@@ -5,6 +5,15 @@
   min-width: 0;
 }
 
+.sourceBadge {
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .pool + .pool {
   margin-top: 8px;
   padding-top: 12px;

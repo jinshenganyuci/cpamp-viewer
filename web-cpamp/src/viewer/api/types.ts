@@ -39,6 +39,7 @@ export interface QuotaWindow {
 
 export interface QuotaAccount {
   id: string;
+  source?: "cpamp" | "sub2api";
   provider: string;
   display_name: string;
   plan?: string;
@@ -55,6 +56,7 @@ export interface QuotaResponse {
   generated_at_ms: number;
   accounts: QuotaAccount[];
   source: string;
+  warnings?: string[];
 }
 
 export interface KeyQuotaItem {

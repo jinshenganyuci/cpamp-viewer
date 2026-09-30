@@ -38,6 +38,11 @@ const providerLabels: Record<string, string> = {
   xai: "xAI 额度",
   meta: "Meta / Muse 额度",
   devin: "Devin 额度",
+  openai: "OpenAI 额度",
+  gemini: "Gemini 额度",
+  zhipu: "智谱额度",
+  deepseek: "DeepSeek 额度",
+  minimax: "MiniMax 额度",
 };
 
 const providerBadge: Record<
@@ -218,6 +223,11 @@ function ViewerQuotaCard({
             ? "xAI"
             : provider.charAt(0).toUpperCase() + provider.slice(1)}
         </span>
+        {account.source ? (
+          <span className={viewerStyles.sourceBadge}>
+            {account.source === "sub2api" ? "Sub2API" : "CPA Manager Plus"}
+          </span>
+        ) : null}
         <span className={styles.fileName} title={account.display_name}>
           {showFull
             ? account.display_name
@@ -431,10 +441,15 @@ export function ViewerQuotaPage() {
       "codex",
       "claude",
       "antigravity",
+      "gemini",
+      "openai",
       "kimi",
       "xai",
       "meta",
       "devin",
+      "zhipu",
+      "deepseek",
+      "minimax",
     ];
     const rank = (provider: string) => {
       const index = order.indexOf(provider);
@@ -448,6 +463,11 @@ export function ViewerQuotaPage() {
   return (
     <div className={styles.container}>
       {error ? <div className={styles.errorBox}>{error}</div> : null}
+      {data?.warnings?.map((warning) => (
+        <div key={warning} className={styles.errorBox}>
+          {warning}
+        </div>
+      ))}
       <div className={styles.toolbar}>
         <div className={styles.toolbarField}>
           <Input

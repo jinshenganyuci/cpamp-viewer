@@ -363,6 +363,38 @@ describe("Viewer quota pool and duration display", () => {
     expect(text.match(/刷新额度/g)).toHaveLength(2);
   });
 
+  it("shows both account sources in the existing quota cards", async () => {
+    mock.data = {
+      warnings: ["Sub2API 额度暂不可用"],
+      accounts: [
+        {
+          id: "view_cpamp",
+          source: "cpamp",
+          provider: "claude",
+          display_name: "CPA 账号",
+          status: "active",
+          windows: [],
+        },
+        {
+          id: "view_sub2api",
+          source: "sub2api",
+          provider: "claude",
+          display_name: "Sub2API 账号",
+          status: "active",
+          windows: [],
+        },
+      ],
+    };
+    await act(async () => {
+      renderer = create(<ViewerQuotaPage />);
+    });
+    const text = JSON.stringify(renderer?.toJSON());
+    expect(renderer?.root.findAllByType("article")).toHaveLength(2);
+    expect(text).toContain("CPA Manager Plus");
+    expect(text).toContain("Sub2API");
+    expect(text).toContain("Sub2API 额度暂不可用");
+  });
+
   it("escapes model scope labels instead of interpreting upstream text as markup", async () => {
     await render(
       [

@@ -397,6 +397,7 @@ export type ViewerQuotaWindow = {
 
 export type ViewerQuotaAccount = {
   id: string;
+  source?: "cpamp" | "sub2api";
   provider: string;
   display_name: string;
   plan?: string;
@@ -413,4 +414,5 @@ export type ViewerQuotaResponse = {
   generated_at_ms?: number;
   accounts?: ViewerQuotaAccount[];
   source?: string;
+  warnings?: string[];
 };

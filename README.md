@@ -3,7 +3,7 @@
 [![CI](https://github.com/jinshenganyuci/cpamp-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/jinshenganyuci/cpamp-viewer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**给朋友看统计和额度的 CPA Manager Plus 只读面板。** 管理密钥留在服务端，浏览器没有修改账号、重置额度或操作插件的权限。
+**给朋友看账号统计和额度的只读面板。** 默认连接 CPA Manager Plus；从源码构建后可额外接入 Sub2API，将两个来源的账号额度放在同一个页面。管理密钥留在服务端，浏览器没有修改账号或重置额度的权限。
 
 当前应用版本 **2.5.0**，已适配 CPAMP **v1.14.1** 的相关只读功能。镜像提供 `linux/amd64`：
 
@@ -97,6 +97,40 @@ curl -fsS http://127.0.0.1:18417/health
 
 默认是公开只读模式，拿到访问地址即可查看，无需登录密码。通过域名提供服务时，把反向代理指向 `http://127.0.0.1:18417`。需要直接通过服务器 IP 访问时，将 `CPAMP_VIEWER_BIND=0.0.0.0` 后重建容器，并按需要限制防火墙或代理访问范围。
 
+## 同时接入 Sub2API
+
+连接 CPA Manager Plus 的同时，可额外读取 Sub2API 管理端的账号列表、Anthropic OAuth/Setup Token 的**被动用量快照**、OpenAI Codex 账号列表中已保存的 5H/7D 额度字段，以及已配置的 API Key 账号额度。在现有“配额管理”页合并展示，并通过卡片上的“CPA Manager Plus / Sub2API”标识区分来源；其他页面继续显示 CPA Manager Plus 数据。OpenAI 账号不请求仅支持 Anthropic 的 `source=passive` 接口；没有有效的已保存窗口时显示“暂无已记录的额度快照”，不会主动探测上游、刷新凭据或修改账号。Sub2API 账号数量上限为 2000，超过时页面显示该来源不可用提示，不会静默遗漏；任一来源不可用时仍尽量展示另一来源。
+
+此功能目前需要**从本仓库源码构建**，已发布的 `2.5.0` 镜像不包含它：
+
+```bash
+docker build -t jinshenganyuci/cpamp-viewer:sub2api-local .
+```
+
+在 `.env` 中配置（CPAMP 和 Sub2API 地址都须从 Viewer 容器可达）：
+
+```dotenv
+CPAMP_VIEWER_VERSION=sub2api-local
+SUB2API_BASE_URL=http://sub2api:8080
+SUB2API_ADMIN_API_KEY_PATH=./secrets/sub2api_admin_api_key.txt
+CLIPROXY_NETWORK=两个上游均可访问的网络名
+```
+
+保留原 CPAMP Admin Key 文件；另将 **Sub2API 管理员 API Key** 写入 `SUB2API_ADMIN_API_KEY_PATH` 指向的文件，不能使用普通调用 API Key。Compose 使用 `compose.sub2api.yaml` 叠加挂载第二份密钥：
+
+```bash
+umask 077
+read -rsp 'Sub2API Admin API Key: ' sub2api_admin_input; echo
+printf '%s' "$sub2api_admin_input" > secrets/sub2api_admin_api_key.txt
+unset sub2api_admin_input
+sudo chown root:65532 secrets/sub2api_admin_api_key.txt
+sudo chmod 0640 secrets/sub2api_admin_api_key.txt
+docker compose -f compose.yaml -f compose.sub2api.yaml up -d --no-build
+curl -fsS http://127.0.0.1:18417/health
+```
+
+访问 `/management.html#/quota`。原生运行可设置 `SUB2API_BASE_URL` 和 `SUB2API_ADMIN_API_KEY`（或 `SUB2API_ADMIN_API_KEY_FILE`）；不用 API Key 时可改用 `SUB2API_ADMIN_JWT`。不设置 `SUB2API_BASE_URL` 时仅使用 CPAMP，原有配置与页面行为不变。
+
 ## 公开 Access Guard 的 Key 额度
 
 默认不公开任何 Key。插件需安装在 CPA，CPAMP 需支持转发插件读取接口。
@@ -142,6 +176,8 @@ Viewer 不保存 CPAMP 请求历史；重建 Viewer 不会清除 CPAMP 数据。
 | 配置 | 用途 / 默认值 |
 | --- | --- |
 | `CPAMP_BASE_URL` | CPAMP 管理地址，必须从 Viewer 容器内可达 |
+| `SUB2API_BASE_URL` | 可选的 Sub2API 管理地址，配置后与 CPAMP 并行读取额度 |
+| `SUB2API_ADMIN_API_KEY_PATH` | 叠加 Compose 文件中的 Sub2API 管理员密钥文件路径 |
 | `CPAMP_ADMIN_KEY_PATH` | 管理密钥文件，默认 `./secrets/cpamp_admin_key.txt` |
 | `VIEWER_SESSION_SECRET_PATH` | 内部签名密钥文件，默认 `./secrets/viewer_session_secret.txt` |
 | `CLIPROXY_NETWORK` | 加入的现有 Docker 网络；远程 HTTPS 地址可用 `bridge` |

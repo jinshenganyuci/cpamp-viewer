@@ -26,6 +26,9 @@ type Config struct {
 	HTTPAddr                 string
 	CPAMPBaseURL             string
 	CPAMPAdminKey            string
+	Sub2APIBaseURL           string
+	Sub2APIAdminAPIKey       string
+	Sub2APIAdminJWT          string
 	PublicAccess             bool
 	ViewerPassword           string
 	SessionSecret            []byte
@@ -49,6 +52,23 @@ func Load() (Config, error) {
 	}
 	if adminKey == "" {
 		return Config{}, errors.New("CPAMP_ADMIN_KEY or CPAMP_ADMIN_KEY_FILE is required")
+	}
+	sub2APIBaseURL := strings.TrimSpace(os.Getenv("SUB2API_BASE_URL"))
+	var sub2APIAdminAPIKey, sub2APIAdminJWT string
+	if sub2APIBaseURL != "" {
+		sub2APIBaseURL, err = validateServiceURL(sub2APIBaseURL, "SUB2API_BASE_URL")
+		if err != nil {
+			return Config{}, err
+		}
+		sub2APIAdminAPIKey, sub2APIAdminJWT, err = loadSub2APICredentials()
+		if err != nil {
+			return Config{}, err
+		}
+		if sub2APIAdminAPIKey == "" && sub2APIAdminJWT == "" {
+			return Config{}, errors.New("SUB2API_ADMIN_API_KEY, SUB2API_ADMIN_API_KEY_FILE, or SUB2API_ADMIN_JWT is required when SUB2API_BASE_URL is set")
+		}
+	} else if strings.TrimSpace(os.Getenv("SUB2API_ADMIN_API_KEY")) != "" || strings.TrimSpace(os.Getenv("SUB2API_ADMIN_API_KEY_FILE")) != "" || strings.TrimSpace(os.Getenv("SUB2API_ADMIN_KEY")) != "" || strings.TrimSpace(os.Getenv("SUB2API_ADMIN_KEY_FILE")) != "" || strings.TrimSpace(os.Getenv("SUB2API_ADMIN_JWT")) != "" || strings.TrimSpace(os.Getenv("SUB2API_ADMIN_JWT_FILE")) != "" {
+		return Config{}, errors.New("SUB2API_BASE_URL is required when Sub2API credentials are configured")
 	}
 
 	publicAccess := boolEnv("VIEWER_PUBLIC_ACCESS", true)
@@ -88,15 +108,17 @@ func Load() (Config, error) {
 		}
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(getenv("CPAMP_BASE_URL", "http://cpa-manager-plus:18317")), "/")
-	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+	cpampBaseURL := strings.TrimRight(strings.TrimSpace(getenv("CPAMP_BASE_URL", "http://cpa-manager-plus:18317")), "/")
+	if !strings.HasPrefix(cpampBaseURL, "http://") && !strings.HasPrefix(cpampBaseURL, "https://") {
 		return Config{}, errors.New("CPAMP_BASE_URL must start with http:// or https://")
 	}
-
 	cfg := Config{
 		HTTPAddr:             getenv("HTTP_ADDR", "0.0.0.0:18417"),
-		CPAMPBaseURL:         baseURL,
+		CPAMPBaseURL:         cpampBaseURL,
 		CPAMPAdminKey:        adminKey,
+		Sub2APIBaseURL:       sub2APIBaseURL,
+		Sub2APIAdminAPIKey:   sub2APIAdminAPIKey,
+		Sub2APIAdminJWT:      sub2APIAdminJWT,
 		PublicAccess:         publicAccess,
 		ViewerPassword:       viewerPassword,
 		SessionSecret:        sessionSecret,
@@ -111,6 +133,47 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func loadSub2APICredentials() (string, string, error) {
+	apiKey, err := readSecret("SUB2API_ADMIN_API_KEY", "SUB2API_ADMIN_API_KEY_FILE")
+	if err != nil {
+		return "", "", err
+	}
+	if apiKey == "" {
+		apiKey, err = readSecret("SUB2API_ADMIN_KEY", "SUB2API_ADMIN_KEY_FILE")
+		if err != nil {
+			return "", "", err
+		}
+	}
+	jwt, err := readSecret("SUB2API_ADMIN_JWT", "SUB2API_ADMIN_JWT_FILE")
+	if err != nil {
+		return "", "", err
+	}
+	return apiKey, jwt, nil
+}
+
+func validateServiceURL(value, name string) (string, error) {
+	invalid := fmt.Errorf("%s must be an http(s) URL with a host and no query or fragment", name)
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Hostname() == "" || parsed.User != nil || parsed.Opaque != "" || strings.ContainsAny(value, "?#\\") {
+		return "", invalid
+	}
+	if strings.Contains(parsed.Path, "//") || strings.Contains(parsed.EscapedPath(), "%") {
+		return "", invalid
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if segment == "." || segment == ".." {
+			return "", invalid
+		}
+	}
+	if port := parsed.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", invalid
+		}
+	}
+	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
 func loadAccessGuard(cfg *Config) error {

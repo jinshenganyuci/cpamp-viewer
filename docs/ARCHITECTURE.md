@@ -4,7 +4,7 @@
 
 ## 1. 运行组成
 
-Viewer 是独立的 Go HTTP 服务，向浏览器提供 React 页面和经过筛选的数据。它通过服务端配置连接 CPA Manager Plus（CPAMP），不直接读取 CPAMP 的数据库文件，也不接管 CPA 或插件的管理界面。
+Viewer 是独立的 Go HTTP 服务，向浏览器提供 React 页面和经过筛选的数据。它通过服务端配置连接 CPA Manager Plus（CPAMP），可额外连接 Sub2API 读取账号额度；不直接读取上游数据库文件，也不接管管理界面。
 
 | 目录或文件 | 职责 |
 | --- | --- |
@@ -12,6 +12,7 @@ Viewer 是独立的 Go HTTP 服务，向浏览器提供 React 页面和经过筛
 | `server/internal/config/` | 环境变量、密钥文件引用、访问模式与 Access Guard 公开范围校验 |
 | `server/internal/auth/` | Viewer 密码验证、会话签名、有效会话登记及注销 |
 | `server/internal/cpamp/` | 携服务端 Admin Key 请求 CPAMP，限制超时、响应大小和重定向 |
+| `server/internal/sub2api/` | 携服务端管理员密钥读取 Sub2API 固定接口，解包响应并限制超时、响应大小和重定向 |
 | `server/internal/accessguard/` | 只访问固定 Access Guard 读取接口的客户端 |
 | `server/internal/httpapi/` | 固定 Viewer 路由、请求校验、公开 DTO 投影及共享缓存 |
 | `web-cpamp/src/viewer/` | Viewer 路由、登录、页面、API 客户端、数据 hook 与适配器 |
@@ -47,15 +48,17 @@ Viewer 本身没有业务数据库。会话有效性登记和各类查询缓存�
 flowchart LR
     Browser[浏览器：Viewer 页面] -->|同源 /viewer/api/v1| API[Go：会话与请求校验]
     API -->|服务端确定路径与凭据| CPAMP[CPAMP 管理读取接口]
+    API -->|可选：账号列表与 Anthropic 被动用量 GET| Sub2API[Sub2API 管理读取接口]
     CPAMP --> CPA[CPA / Provider]
     CPAMP --> Projection[字段白名单与身份替换]
+    Sub2API --> Projection
     Projection --> Cache[公开 DTO / 共享缓存]
     Cache --> Browser
     API -->|可选独立连接、固定 GET| Guard[Access Guard]
     Guard --> Projection
 ```
 
-浏览器只使用 `web-cpamp/src/viewer/api/client.ts` 中的固定同源 API，不接收 CPAMP Admin Key、CPA Management Key 或 Provider Token。上游地址、方法、请求头和凭据选择由服务端代码控制。公开 API 没有任意 URL 代理或任意管理接口转发能力。
+浏览器只使用 `web-cpamp/src/viewer/api/client.ts` 中的固定同源 API，不接收 CPAMP Admin Key、Sub2API 管理员密钥、CPA Management Key 或 Provider Token。上游地址、方法、请求头和凭据选择由服务端代码控制。公开 API 没有任意 URL 代理或任意管理接口转发能力。
 
 只读指不允许修改上游配置、凭据、额度或历史数据，并不要求所有查询都使用 HTTP GET。统计筛选使用 POST 携带查询条件；非 Codex 额度快照也使用固定 POST 查询。Codex 额度读取使用 CPA 的 POST 包装接口，但包装内的方法固定为 GET。登录、注销只影响 Viewer 自己的会话。
 
@@ -117,7 +120,11 @@ flowchart LR
 
 ## 6. 额度查询
 
-`GET /quota` 的账户列表来自服务端读取的 auth-file 元数据，浏览器不能指定账户、凭据、上游地址或请求头。处理器同时组织完整 Codex 查询、非 Codex 已保存快照和请求头观测，最后生成统一的账户与窗口 DTO。
+`GET /quota` 的 CPAMP 账户列表来自服务端读取的 auth-file 元数据，浏览器不能指定账户、凭据、上游地址或请求头。处理器同时组织完整 Codex 查询、非 Codex 已保存快照和请求头观测，最后生成统一的账户与窗口 DTO。配置 Sub2API 后，服务端并行读取两个来源并在同一响应中合并账号，逐账号保留 `source` 标识；单侧读取失败时返回另一侧数据和通用提示。
+
+### Sub2API 被动额度
+
+`sub2api_quota.go` 读取分页 `/api/v1/admin/accounts`。仅对 Anthropic OAuth/Setup Token 账号以最多 8 个并发 GET 请求固定的 `/api/v1/admin/accounts/:id/usage?source=passive`；OpenAI Codex 则从账号列表 `extra` 中投影已有的 5H/7D 用量、时长和重置时间，丢弃空时长与已过期窗口。其他账号只显示明确配置的额度，不请求不受支持的被动接口，也不使用可能触发主动探测的批量接口。仅把名称、平台、套餐、状态及可确认的额度窗口投影到现有 DTO；原始凭据、账号 ID 和上游错误正文不公开。缺失使用率保持 `null`，最多处理 2000 个账号，超出时该来源整体标记不可用而非静默截断。两套管理员密钥分别配置，不互相复用。
 
 ### Codex 完整额度
 

@@ -4,7 +4,7 @@ CPAMP Viewer 面向访客提供只读数据。默认公开访问不等于管理�
 
 维护这些约束：
 
-- CPAMP Admin Key、CPA Management Key、提供方 Token 只留在服务端。
+- CPAMP Admin Key、Sub2API 管理员密钥、CPA Management Key、提供方 Token 只留在服务端。
 - 访客不能指定上游 URL、方法、凭据、认证索引或请求体来调用管理接口。
 - 不允许额度重置、账号编辑、OAuth、原始导入导出、归档删除等管理操作进入 Viewer。
 - Access Guard 默认不公开条目。配置明确名单，或显式启用 `ACCESS_GUARD_PUBLIC_ALL=true` 后才公开。

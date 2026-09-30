@@ -29,6 +29,7 @@ import (
 	"cpamp-viewer/server/internal/auth"
 	"cpamp-viewer/server/internal/config"
 	"cpamp-viewer/server/internal/cpamp"
+	"cpamp-viewer/server/internal/sub2api"
 )
 
 var (
@@ -90,6 +91,7 @@ type Server struct {
 	cfg                  config.Config
 	auth                 *auth.Manager
 	cpamp                *cpamp.Client
+	sub2api              *sub2api.Client
 	web                  fs.FS
 	logger               *slog.Logger
 	analyticsSem         chan struct{}
@@ -127,6 +129,7 @@ type quotaWindow struct {
 
 type quotaAccount struct {
 	ID            string        `json:"id"`
+	Source        string        `json:"source,omitempty"`
 	Provider      string        `json:"provider"`
 	DisplayName   string        `json:"display_name"`
 	Plan          string        `json:"plan,omitempty"`
@@ -143,6 +146,7 @@ type quotaResponse struct {
 	GeneratedAt int64          `json:"generated_at_ms"`
 	Accounts    []quotaAccount `json:"accounts"`
 	Source      string         `json:"source"`
+	Warnings    []string       `json:"warnings,omitempty"`
 }
 
 type databaseMaintenanceStatus struct {
@@ -490,10 +494,15 @@ func New(cfg config.Config, webFS embed.FS, logger *slog.Logger) (*Server, error
 		return nil, err
 	}
 	client := cpamp.New(cfg.CPAMPBaseURL, cfg.CPAMPAdminKey, cfg.RequestTimeout, cfg.MaxUpstreamBodyBytes)
+	var sub2APIClient *sub2api.Client
+	if cfg.Sub2APIBaseURL != "" {
+		sub2APIClient = sub2api.New(cfg.Sub2APIBaseURL, cfg.Sub2APIAdminAPIKey, cfg.Sub2APIAdminJWT, cfg.RequestTimeout, cfg.MaxUpstreamBodyBytes)
+	}
 	return &Server{
 		cfg:                  cfg,
 		auth:                 auth.New(cfg.ViewerPassword, cfg.SessionSecret, cfg.SessionTTL, cfg.SecureCookies),
 		cpamp:                client,
+		sub2api:              sub2APIClient,
 		web:                  web,
 		logger:               logger,
 		analyticsSem:         make(chan struct{}, 4),
@@ -893,10 +902,59 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 28*time.Second)
 	defer cancel()
+	if s.sub2api == nil {
+		accounts, err := s.loadCPAMPQuota(ctx)
+		if err != nil {
+			s.writeUpstreamError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, quotaResponse{GeneratedAt: time.Now().UnixMilli(), Accounts: accounts, Source: "cpamp-quota"})
+		return
+	}
+	type cpampQuotaResult struct {
+		accounts []quotaAccount
+		err      error
+	}
+	cpampDone := make(chan cpampQuotaResult, 1)
+	go func() {
+		accounts, err := s.loadCPAMPQuota(ctx)
+		cpampDone <- cpampQuotaResult{accounts: accounts, err: err}
+	}()
+	sub2APIAccounts, sub2APIErr := s.loadSub2APIQuota(ctx)
+	cpampResult := <-cpampDone
+	if cpampResult.err != nil && sub2APIErr != nil {
+		s.writeUpstreamError(w, cpampResult.err)
+		return
+	}
+	accounts := make([]quotaAccount, 0, len(cpampResult.accounts)+len(sub2APIAccounts))
+	accounts = append(accounts, cpampResult.accounts...)
+	accounts = append(accounts, sub2APIAccounts...)
+	sort.Slice(accounts, func(i, j int) bool {
+		if accounts[i].Provider == accounts[j].Provider {
+			if accounts[i].Source == accounts[j].Source {
+				return accounts[i].DisplayName < accounts[j].DisplayName
+			}
+			return accounts[i].Source < accounts[j].Source
+		}
+		return accounts[i].Provider < accounts[j].Provider
+	})
+	response := quotaResponse{GeneratedAt: time.Now().UnixMilli(), Accounts: accounts, Source: "combined-quota"}
+	if cpampResult.err != nil {
+		response.Warnings = append(response.Warnings, "CPA Manager Plus 额度暂不可用")
+	}
+	if sub2APIErr != nil {
+		response.Warnings = append(response.Warnings, "Sub2API 额度暂不可用")
+		if s.logger != nil {
+			s.logger.Warn("Sub2API quota unavailable", "error", sub2APIErr)
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) loadCPAMPQuota(ctx context.Context) ([]quotaAccount, error) {
 	var files authFileEnvelope
 	if err := s.cpamp.GetJSON(ctx, "/v0/management/auth-files", nil, &files); err != nil {
-		s.writeUpstreamError(w, err)
-		return
+		return nil, err
 	}
 	var snapshots headerSnapshotEnvelope
 	query := url.Values{"days": {"30"}, "limit": {"1000"}}
@@ -925,6 +983,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	for _, file := range files.Files {
 		account, ok := projectQuotaAccount(file, latest)
 		if ok {
+			account.Source = "cpamp"
 			if account.Provider != "codex" {
 				query, queryable := quotaSnapshotAccount(file)
 				result := stored[query.RowKey]
@@ -969,7 +1028,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		}
 		return accounts[i].Provider < accounts[j].Provider
 	})
-	writeJSON(w, http.StatusOK, quotaResponse{GeneratedAt: time.Now().UnixMilli(), Accounts: accounts, Source: "cpamp-quota"})
+	return accounts, nil
 }
 
 func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {

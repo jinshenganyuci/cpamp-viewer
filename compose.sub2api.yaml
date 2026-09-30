@@ -1,0 +1,11 @@
+services:
+  cpamp-viewer:
+    environment:
+      SUB2API_BASE_URL: ${SUB2API_BASE_URL:?set SUB2API_BASE_URL}
+      SUB2API_ADMIN_API_KEY_FILE: /run/secrets/sub2api_admin_key
+    secrets:
+      - sub2api_admin_key
+
+secrets:
+  sub2api_admin_key:
+    file: ${SUB2API_ADMIN_API_KEY_PATH:-./secrets/sub2api_admin_api_key.txt}

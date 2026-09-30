@@ -10,6 +10,13 @@ import (
 
 func prepareConfigTest(t *testing.T) {
 	t.Helper()
+	t.Setenv("SUB2API_BASE_URL", "")
+	t.Setenv("SUB2API_ADMIN_API_KEY", "")
+	t.Setenv("SUB2API_ADMIN_API_KEY_FILE", "")
+	t.Setenv("SUB2API_ADMIN_KEY", "")
+	t.Setenv("SUB2API_ADMIN_KEY_FILE", "")
+	t.Setenv("SUB2API_ADMIN_JWT", "")
+	t.Setenv("SUB2API_ADMIN_JWT_FILE", "")
 	t.Setenv("CPAMP_ADMIN_KEY", "test-admin-key")
 	t.Setenv("CPAMP_ADMIN_KEY_FILE", "")
 	t.Setenv("VIEWER_PASSWORD", "")
@@ -23,6 +30,41 @@ func prepareConfigTest(t *testing.T) {
 	t.Setenv("ACCESS_GUARD_PUBLIC_ALL", "")
 	t.Setenv("ACCESS_GUARD_PUBLIC_KEYS", "")
 	t.Setenv("ACCESS_GUARD_PUBLIC_KEYS_FILE", "")
+}
+
+func TestLoadSub2APIRequiresDedicatedCredential(t *testing.T) {
+	prepareConfigTest(t)
+	t.Setenv("SUB2API_BASE_URL", "https://sub2api.example.test/prefix/")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "SUB2API_ADMIN_API_KEY") {
+		t.Fatalf("expected missing Sub2API credential error, got %v", err)
+	}
+	t.Setenv("SUB2API_ADMIN_API_KEY", "test-sub2api-admin-key")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sub2APIAdminAPIKey != "test-sub2api-admin-key" || cfg.CPAMPAdminKey != "test-admin-key" || cfg.Sub2APIBaseURL != "https://sub2api.example.test/prefix" {
+		t.Fatalf("unexpected Sub2API configuration: %#v", cfg)
+	}
+}
+
+func TestLoadSub2APIRejectsAmbiguousURL(t *testing.T) {
+	prepareConfigTest(t)
+	t.Setenv("SUB2API_ADMIN_JWT", "test-admin-jwt")
+	for _, value := range []string{"https://user:pass@example.test", "https://example.test/path?x=1", "https://example.test/#fragment", "https://example.test/../admin", "https://example.test\\evil.test"} {
+		t.Setenv("SUB2API_BASE_URL", value)
+		if _, err := Load(); err == nil {
+			t.Fatalf("accepted invalid Sub2API URL %q", value)
+		}
+	}
+}
+
+func TestLoadRejectsSub2APISecretWithoutURL(t *testing.T) {
+	prepareConfigTest(t)
+	t.Setenv("SUB2API_ADMIN_API_KEY_FILE", "/missing/sub2api-key")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "SUB2API_BASE_URL") {
+		t.Fatalf("expected missing Sub2API URL error, got %v", err)
+	}
 }
 
 func writeConfigFixture(t *testing.T, data string) string {
