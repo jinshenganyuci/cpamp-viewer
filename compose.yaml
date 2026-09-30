@@ -2,7 +2,7 @@ name: cpamp-viewer
 
 services:
   cpamp-viewer:
-    image: jinshenganyuci/cpamp-viewer:${CPAMP_VIEWER_VERSION:-2.5.0}
+    image: jinshenganyuci/cpamp-viewer:${CPAMP_VIEWER_VERSION:-2.6.0}
     platform: linux/amd64
     restart: unless-stopped
     environment:

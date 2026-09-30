@@ -2,12 +2,12 @@ name: cpamp-viewer-acceptance
 
 services:
   cpamp-viewer-v2:
-    image: cpamp-viewer:${CPAMP_VIEWER_VERSION:-2.5.0}
+    image: cpamp-viewer:${CPAMP_VIEWER_VERSION:-2.6.0}
     platform: linux/amd64
     build:
       context: .
       args:
-        VERSION: ${CPAMP_VIEWER_VERSION:-2.5.0}
+        VERSION: ${CPAMP_VIEWER_VERSION:-2.6.0}
     container_name: cpamp-viewer-v2-acceptance
     restart: unless-stopped
     environment:

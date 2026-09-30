@@ -87,6 +87,12 @@ for compose_pair in "docker-compose.viewer.yml docker-compose.access-guard.yml" 
   ACCESS_GUARD_MANAGEMENT_KEY_PATH=/dev/null ACCESS_GUARD_PUBLIC_KEYS_PATH=/dev/null \
     docker compose -f "${ROOT_DIR}/${base_compose}" -f "${ROOT_DIR}/${plugin_compose}" config --quiet
 done
+for base_compose in compose.yaml docker-compose.viewer.yml; do
+  CPAMP_VIEWER_VERSION="${VERSION}" CLIPROXY_NETWORK=bridge \
+  CPAMP_ADMIN_KEY_PATH=/dev/null VIEWER_SESSION_SECRET_PATH=/dev/null \
+  SUB2API_BASE_URL=http://sub2api.example.invalid:8080 SUB2API_ADMIN_API_KEY_PATH=/dev/null \
+    docker compose -f "${ROOT_DIR}/${base_compose}" -f "${ROOT_DIR}/compose.sub2api.yaml" config --quiet
+done
 docker buildx build --check \
   --platform linux/amd64 \
   --build-arg VERSION="${VERSION}" \
@@ -227,7 +233,7 @@ cp "${ROOT_DIR}/docker-compose.access-guard.acceptance.yml" "${DEPLOYMENT_DIR}/"
 cp "${ROOT_DIR}/access-guard-public-keys.example.json" "${DEPLOYMENT_DIR}/"
 cp "${ROOT_DIR}/.env.example" "${DEPLOYMENT_DIR}/.env.example"
 cp "${ROOT_DIR}/README.md" "${DEPLOYMENT_DIR}/"
-cp "${ROOT_DIR}/compose.yaml" "${DEPLOYMENT_DIR}/"
+cp "${ROOT_DIR}/compose.yaml" "${ROOT_DIR}/compose.sub2api.yaml" "${DEPLOYMENT_DIR}/"
 cp "${ROOT_DIR}/LICENSE" "${ROOT_DIR}/CONTRIBUTING.md" "${ROOT_DIR}/SECURITY.md" "${DEPLOYMENT_DIR}/"
 cp -a "${ROOT_DIR}/docs" "${DEPLOYMENT_DIR}/docs"
 cp "${VERSION_FILE}" "${DEPLOYMENT_DIR}/VERSION"
@@ -239,6 +245,8 @@ printf '%s\n' \
   'Create these files locally; never place real values in a release archive:' \
   '  cpamp_admin_key.txt' \
   '  viewer_session_secret.txt' \
+  'Optional Sub2API overlay additionally reads:' \
+  '  sub2api_admin_api_key.txt' \
   'Optional Access Guard overlay additionally reads:' \
   '  access_guard_management_key.txt' \
   '  access_guard_public_keys.json (copy and edit the empty example)' \
@@ -293,7 +301,9 @@ create_normalized_archive "${DEPLOYMENT_DIR}" "${DEPLOYMENT_ARCHIVE}"
     "${IMAGE_ARCHIVE_NAME}" \
     "$(basename "${WINDOWS_ARCHIVE}")" \
     "$(basename "${DEPLOYMENT_ARCHIVE}")" \
-    "cpamp-viewer_${VERSION}_windows_amd64.sha256" \
+    "${IMAGE_ARCHIVE_NAME}.sha256" \
+    "$(basename "${WINDOWS_ARCHIVE}").sha256" \
+    "$(basename "${DEPLOYMENT_ARCHIVE}").sha256" \
     > SHA256SUMS
 )
 (

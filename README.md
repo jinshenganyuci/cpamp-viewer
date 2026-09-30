@@ -3,12 +3,12 @@
 [![CI](https://github.com/jinshenganyuci/cpamp-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/jinshenganyuci/cpamp-viewer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**给朋友看账号统计和额度的只读面板。** 默认连接 CPA Manager Plus；从源码构建后可额外接入 Sub2API，将两个来源的账号额度放在同一个页面。管理密钥留在服务端，浏览器没有修改账号或重置额度的权限。
+**给朋友看账号统计和额度的只读面板。** 默认连接 CPA Manager Plus；可额外接入 Sub2API，将两个来源的账号额度放在同一个页面。管理密钥留在服务端，浏览器没有修改账号或重置额度的权限。
 
-当前应用版本 **2.5.0**，已适配 CPAMP **v1.14.1** 的相关只读功能。镜像提供 `linux/amd64`：
+当前应用版本 **2.6.0**，已适配 CPAMP **v1.14.1** 的相关只读功能。镜像提供 `linux/amd64`：
 
 ```text
-jinshenganyuci/cpamp-viewer:2.5.0
+jinshenganyuci/cpamp-viewer:2.6.0
 jinshenganyuci/cpamp-viewer:latest
 ```
 
@@ -21,7 +21,7 @@ jinshenganyuci/cpamp-viewer:latest
 | 仪表盘 | 请求、Token、费用、模型与服务状态 |
 | 用量分析 | 时间范围、模型、调用方、凭证统计；历史明细清理后的覆盖提示 |
 | 请求监控 | 请求模型、路由模型、实际响应模型与“模型不一致”提示 |
-| 配额管理 | Codex 普通池 / Spark 分开显示；Meta/Muse、Devin、xAI 等已保存快照 |
+| 配额管理 | Codex 普通池 / Spark 分开显示；Meta/Muse、Devin、xAI 等已保存快照；可选合并 Sub2API 账号额度 |
 | Key 额度 | Access Guard 指定公开条目的名称、剩余额度与重置时间 |
 | 用量状态 | 在线/已归档/已清理记录、存储占用和维护状态，仅查看 |
 
@@ -47,7 +47,7 @@ mkdir -p secrets
 ```dotenv
 CPAMP_BASE_URL=https://你的CPAMP管理域名
 CLIPROXY_NETWORK=bridge
-CPAMP_VIEWER_VERSION=2.5.0
+CPAMP_VIEWER_VERSION=2.6.0
 CPAMP_VIEWER_BIND=127.0.0.1
 CPAMP_VIEWER_PORT=18417
 ```
@@ -101,33 +101,70 @@ curl -fsS http://127.0.0.1:18417/health
 
 连接 CPA Manager Plus 的同时，可额外读取 Sub2API 管理端的账号列表、Anthropic OAuth/Setup Token 的**被动用量快照**、OpenAI Codex 账号列表中已保存的 5H/7D 额度字段，以及已配置的 API Key 账号额度。在现有“配额管理”页合并展示，并通过卡片上的“CPA Manager Plus / Sub2API”标识区分来源；其他页面继续显示 CPA Manager Plus 数据。OpenAI 账号不请求仅支持 Anthropic 的 `source=passive` 接口；没有有效的已保存窗口时显示“暂无已记录的额度快照”，不会主动探测上游、刷新凭据或修改账号。Sub2API 账号数量上限为 2000，超过时页面显示该来源不可用提示，不会静默遗漏；任一来源不可用时仍尽量展示另一来源。
 
-此功能目前需要**从本仓库源码构建**，已发布的 `2.5.0` 镜像不包含它：
+**2.6.0 正式镜像已包含此功能，无需本地构建。** Sub2API 是可选的第二个额度来源，不能替代 CPAMP：仍须保留有效的 `CPAMP_BASE_URL` 和 CPAMP Admin Key。两个管理地址都必须从 Viewer 容器可达。
 
-```bash
-docker build -t jinshenganyuci/cpamp-viewer:sub2api-local .
+### 现有自定义 Compose：只加两项环境变量
+
+不想新增密钥文件时，在原服务的 `image` 和 `environment` 中修改以下字段，其余配置保留：
+
+```yaml
+services:
+  cpamp-viewer:
+    image: jinshenganyuci/cpamp-viewer:2.6.0
+    environment:
+      SUB2API_BASE_URL: ${SUB2API_BASE_URL}
+      SUB2API_ADMIN_API_KEY: ${SUB2API_ADMIN_API_KEY}
 ```
 
-在 `.env` 中配置（CPAMP 和 Sub2API 地址都须从 Viewer 容器可达）：
+在原 `.env` 增加：
 
 ```dotenv
-CPAMP_VIEWER_VERSION=sub2api-local
-SUB2API_BASE_URL=http://sub2api:8080
-SUB2API_ADMIN_API_KEY_PATH=./secrets/sub2api_admin_api_key.txt
-CLIPROXY_NETWORK=两个上游均可访问的网络名
+SUB2API_BASE_URL=https://sub2api.example.com
+SUB2API_ADMIN_API_KEY=替换为Sub2API管理员APIKey
 ```
+
+然后在原部署目录运行 `docker compose pull cpamp-viewer` 和 `docker compose up -d --no-deps cpamp-viewer`。这里需要 **管理员 API Key，不是模型调用 Key**。`.env` 只供 Compose 插值，必须同时添加上面的 `environment` 映射；只写 `.env` 不会生效。密钥仍留在服务端，但会存在容器环境变量中；不要把 `.env` 提交到 Git。此方式不要叠加下一节的文件密钥方案，也不要同时设置 `SUB2API_ADMIN_API_KEY_FILE`。
+
+### 仓库自带 Compose：独立密钥文件
+
+已部署的用户保留原 `.env`，将版本改为 `2.6.0`，再新增 `SUB2API_BASE_URL` 和 `SUB2API_ADMIN_API_KEY_PATH`。下面是一份可用的 `.env` 示例；按实际情况替换管理地址，原有 Access Guard 公开设置继续保留：
+
+```dotenv
+CPAMP_VIEWER_VERSION=2.6.0
+VIEWER_PUBLIC_ACCESS=true
+TZ=Asia/Shanghai
+CPAMP_VIEWER_BIND=127.0.0.1
+CPAMP_VIEWER_PORT=18417
+CLIPROXY_NETWORK=bridge
+CPAMP_BASE_URL=https://cpamp.example.com
+CPAMP_ADMIN_KEY_PATH=./secrets/cpamp_admin_key.txt
+VIEWER_SESSION_SECRET_PATH=./secrets/viewer_session_secret.txt
+VIEWER_SECURE_COOKIES=false
+VIEWER_SESSION_TTL=12h
+VIEWER_MAX_ANALYTICS_RANGE=8784h
+VIEWER_MAX_EVENTS_PAGE=200
+SUB2API_BASE_URL=https://sub2api.example.com
+SUB2API_ADMIN_API_KEY_PATH=./secrets/sub2api_admin_api_key.txt
+```
+
+若通过 Docker 容器名连接上游，将 `CLIPROXY_NETWORK` 改为能访问两个服务的现有自定义网络，例如 `shared_backend`；相应地址可填写 `http://cpa-manager-plus:18317` 和 `http://sub2api:8080`。Docker 自带的 `bridge` 不提供这些容器名的 DNS 解析；跨主机连接使用 HTTPS。
 
 保留原 CPAMP Admin Key 文件；另将 **Sub2API 管理员 API Key** 写入 `SUB2API_ADMIN_API_KEY_PATH` 指向的文件，不能使用普通调用 API Key。Compose 使用 `compose.sub2api.yaml` 叠加挂载第二份密钥：
 
 ```bash
+mkdir -p secrets
 umask 077
 read -rsp 'Sub2API Admin API Key: ' sub2api_admin_input; echo
 printf '%s' "$sub2api_admin_input" > secrets/sub2api_admin_api_key.txt
 unset sub2api_admin_input
 sudo chown root:65532 secrets/sub2api_admin_api_key.txt
 sudo chmod 0640 secrets/sub2api_admin_api_key.txt
-docker compose -f compose.yaml -f compose.sub2api.yaml up -d --no-build
+docker compose -f compose.yaml -f compose.sub2api.yaml pull cpamp-viewer
+docker compose -f compose.yaml -f compose.sub2api.yaml up -d --no-build --no-deps cpamp-viewer
 curl -fsS http://127.0.0.1:18417/health
 ```
+
+**使用本节叠加文件方案时，以后每次拉取、升级、重建、查看日志或停止服务，都保留这两个 `-f` 参数。** 只执行 `docker compose up -d` 会遗漏 Sub2API 的环境变量和密钥挂载。仅修改 `.env` 不会自动把新增变量传进容器，必须使用叠加文件。
 
 访问 `/management.html#/quota`。原生运行可设置 `SUB2API_BASE_URL` 和 `SUB2API_ADMIN_API_KEY`（或 `SUB2API_ADMIN_API_KEY_FILE`）；不用 API Key 时可改用 `SUB2API_ADMIN_JWT`。不设置 `SUB2API_BASE_URL` 时仅使用 CPAMP，原有配置与页面行为不变。
 
@@ -153,6 +190,12 @@ ACCESS_GUARD_PUBLIC_ALL=true
 docker compose up -d --no-deps --force-recreate cpamp-viewer
 ```
 
+通过叠加文件启用 Sub2API 时，上面的重建命令改用：
+
+```bash
+docker compose -f compose.yaml -f compose.sub2api.yaml up -d --no-build --no-deps --force-recreate cpamp-viewer
+```
+
 访问 `/management.html#/key-quota`。正常情况下复用 `CPAMP_BASE_URL` 和 CPAMP Admin Key，**不需要再配置 `ACCESS_GUARD_BASE_URL`**；独立连接 CPA 的兼容方式见 [高级部署说明](docs/DEPLOYMENT.md)。
 
 ## 升级与日常操作
@@ -163,6 +206,18 @@ docker compose up -d --no-deps --force-recreate cpamp-viewer
 docker compose pull cpamp-viewer
 docker compose up -d --no-deps cpamp-viewer
 ```
+
+通过叠加文件启用 Sub2API 的部署使用：
+
+```bash
+docker compose -f compose.yaml -f compose.sub2api.yaml pull cpamp-viewer
+docker compose -f compose.yaml -f compose.sub2api.yaml up -d --no-build --no-deps cpamp-viewer
+docker compose -f compose.yaml -f compose.sub2api.yaml logs --tail 100 cpamp-viewer
+# 停止时同样使用这两个文件：
+# docker compose -f compose.yaml -f compose.sub2api.yaml down
+```
+
+仅连接 CPAMP 或使用原有自定义 Compose 时，日常命令为：
 
 ```bash
 docker compose logs --tail 100 cpamp-viewer  # 查看日志
@@ -177,11 +232,11 @@ Viewer 不保存 CPAMP 请求历史；重建 Viewer 不会清除 CPAMP 数据。
 | --- | --- |
 | `CPAMP_BASE_URL` | CPAMP 管理地址，必须从 Viewer 容器内可达 |
 | `SUB2API_BASE_URL` | 可选的 Sub2API 管理地址，配置后与 CPAMP 并行读取额度 |
-| `SUB2API_ADMIN_API_KEY_PATH` | 叠加 Compose 文件中的 Sub2API 管理员密钥文件路径 |
+| `SUB2API_ADMIN_API_KEY_PATH` | 叠加 Compose 文件中的 Sub2API **管理员** API Key 文件，默认 `./secrets/sub2api_admin_api_key.txt` |
 | `CPAMP_ADMIN_KEY_PATH` | 管理密钥文件，默认 `./secrets/cpamp_admin_key.txt` |
 | `VIEWER_SESSION_SECRET_PATH` | 内部签名密钥文件，默认 `./secrets/viewer_session_secret.txt` |
 | `CLIPROXY_NETWORK` | 加入的现有 Docker 网络；远程 HTTPS 地址可用 `bridge` |
-| `CPAMP_VIEWER_VERSION` | 发布镜像标签，默认 `2.5.0` |
+| `CPAMP_VIEWER_VERSION` | 发布镜像标签，默认 `2.6.0` |
 | `CPAMP_VIEWER_BIND` / `CPAMP_VIEWER_PORT` | 宿主机绑定地址 / 端口，默认 `127.0.0.1:18417` |
 | `ACCESS_GUARD_PUBLIC_ALL` | 是否公开全部绑定，默认 `false` |
 | `ACCESS_GUARD_PUBLIC_KEYS` | 明确的公开名单，与上项互斥 |
@@ -219,6 +274,7 @@ git switch -c feat/你的功能名
 
 - **容器 unhealthy / `/health` 返回 503**：确认 CPAMP 地址、容器网络和 Admin Key，查看 Viewer 日志。
 - **`/run/secrets/... permission denied`**：按上文设置密钥文件属组 `65532`、权限 `0640`。
+- **配置了 Sub2API 却没有来源卡片**：自定义 Compose 检查 `environment` 映射，仓库文件方案确认启动时同时使用 `-f compose.yaml -f compose.sub2api.yaml`；检查管理员 API Key、容器网络和页面来源错误提示。没有已采样数据时不会显示满额。
 - **Key 额度为空**：检查公开名单/开关及插件绑定；公开名单为空时不会自动展示。
 - **新字段或用量状态不可用**：上游 CPAMP 必须提供对应接口和已采集数据。部分配额来自保存的观测快照；缺失数据不是满额。
 - **`go test` 提示 `webdist` 没有文件**：先按开发指南构建前端，再从 `server/` 目录运行 Go 命令。

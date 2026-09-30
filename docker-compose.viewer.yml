@@ -2,12 +2,12 @@ name: cpamp-viewer
 
 services:
   cpamp-viewer:
-    image: cpamp-viewer:${CPAMP_VIEWER_VERSION:-2.5.0}
+    image: cpamp-viewer:${CPAMP_VIEWER_VERSION:-2.6.0}
     platform: linux/amd64
     build:
       context: .
       args:
-        VERSION: ${CPAMP_VIEWER_VERSION:-2.5.0}
+        VERSION: ${CPAMP_VIEWER_VERSION:-2.6.0}
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Shanghai}

@@ -1,6 +1,6 @@
 services:
   cpamp-viewer:
-    image: jinshenganyuci/cpamp-viewer:2.5.0
+    image: jinshenganyuci/cpamp-viewer:2.6.0
     container_name: cpamp-viewer
     restart: unless-stopped
 
