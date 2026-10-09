@@ -228,7 +228,14 @@ function ViewerQuotaCard({
             {account.source === "sub2api" ? "Sub2API" : "CPA Manager Plus"}
           </span>
         ) : null}
-        <span className={styles.fileName} title={account.display_name}>
+        <span
+          className={styles.fileName}
+          title={
+            showFull
+              ? account.display_name
+              : maskDisplayName(account.display_name)
+          }
+        >
           {showFull
             ? account.display_name
             : maskDisplayName(account.display_name)}
