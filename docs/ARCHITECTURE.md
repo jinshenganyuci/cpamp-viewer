@@ -124,7 +124,7 @@ flowchart LR
 
 ### Sub2API 被动额度
 
-`sub2api_quota.go` 读取分页 `/api/v1/admin/accounts`。仅对 Anthropic OAuth/Setup Token 账号以最多 8 个并发 GET 请求固定的 `/api/v1/admin/accounts/:id/usage?source=passive`；OpenAI Codex 则从账号列表 `extra` 中投影已有的 5H/7D 用量、时长和重置时间，丢弃空时长与已过期窗口。其他账号只显示明确配置的额度，不请求不受支持的被动接口，也不使用可能触发主动探测的批量接口。仅把名称、平台、套餐、状态及可确认的额度窗口投影到现有 DTO；原始凭据、账号 ID 和上游错误正文不公开。缺失使用率保持 `null`，最多处理 2000 个账号，超出时该来源整体标记不可用而非静默截断。两套管理员密钥分别配置，不互相复用。普通 Codex 与 Spark 的窗口保留各自的额度池标识，Spark 不会被归入普通 Codex；Anthropic 被动响应没有有效使用率时显示未知，不推算为剩余 100%。
+`sub2api_quota.go` 读取分页 `/api/v1/admin/accounts`。仅对 Anthropic OAuth/Setup Token 账号以最多 8 个并发 GET 请求固定的 `/api/v1/admin/accounts/:id/usage?source=passive`；OpenAI Codex 则从账号列表 `extra` 中投影已有的 5H/7D 和非重复主次窗口，用实际时长与重置时间识别，丢弃空时长与已过期窗口。其他账号只显示明确配置的额度，不请求不受支持的被动接口，也不使用可能触发主动探测的批量接口。仅把可信的邮箱（代替自定义别名）、平台、套餐、状态及可确认的额度窗口投影到现有 DTO；`credentials` 只解码 `email` 和 `plan_type`，原始凭据、账号 ID 和上游错误正文不公开。缺失使用率保持 `null`，最多处理 2000 个账号，超出时该来源整体标记不可用而非静默截断。两套管理员密钥分别配置，不互相复用。普通 Codex 与 Spark 的窗口保留各自的额度池标识，Spark 不会被归入普通 Codex；Anthropic 被动响应没有有效使用率时显示未知，不推算为剩余 100%。
 
 2.6.0 正式镜像已包含该适配器。`compose.sub2api.yaml` 在基础 Compose 上叠加 `SUB2API_BASE_URL`、`SUB2API_ADMIN_API_KEY_FILE` 和管理员密钥文件挂载；`.env` 的 `SUB2API_ADMIN_API_KEY_PATH` 只用于 Compose 定位宿主机文件。后续重建必须保留叠加文件。该来源只补充配额页，CPAMP 仍为必需上游，`/health` 仍检查 CPAMP。
 

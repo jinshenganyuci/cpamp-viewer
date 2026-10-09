@@ -395,6 +395,43 @@ describe("Viewer quota pool and duration display", () => {
     expect(text).toContain("Sub2API 额度暂不可用");
   });
 
+  it("shows the original plan and masks both account emails", async () => {
+    mock.data = {
+      accounts: [
+        {
+          id: "view_cpamp",
+          source: "cpamp",
+          provider: "codex",
+          display_name: "cpa@example.test",
+          plan: "pro",
+          status: "active",
+          windows: [],
+        },
+        {
+          id: "view_sub2api",
+          source: "sub2api",
+          provider: "codex",
+          display_name: "sub@example.test",
+          plan: "pro",
+          status: "active",
+          windows: [],
+        },
+      ],
+    };
+    await act(async () => {
+      renderer = create(<ViewerQuotaPage />);
+    });
+    const text = JSON.stringify(renderer?.toJSON());
+    const plans = renderer?.root.findAll(
+      (node) => node.type === "strong" && node.children.includes("pro"),
+    );
+    expect(plans).toHaveLength(2);
+    expect(text).toContain("c***@example.test");
+    expect(text).toContain("s***@example.test");
+    expect(text).not.toContain("cpa@example.test");
+    expect(text).not.toContain("sub@example.test");
+  });
+
   it("escapes model scope labels instead of interpreting upstream text as markup", async () => {
     await render(
       [

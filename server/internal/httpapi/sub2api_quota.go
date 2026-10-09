@@ -30,23 +30,28 @@ type sub2APIAccountList struct {
 }
 
 type sub2APIAccount struct {
-	ID               int64          `json:"id"`
-	Name             string         `json:"name"`
-	Platform         string         `json:"platform"`
-	Type             string         `json:"type"`
-	QuotaDimension   string         `json:"quota_dimension"`
-	Status           string         `json:"status"`
-	ErrorMessage     string         `json:"error_message"`
-	UpdatedAt        string         `json:"updated_at"`
-	Extra            map[string]any `json:"extra"`
-	QuotaLimit       *float64       `json:"quota_limit"`
-	QuotaUsed        *float64       `json:"quota_used"`
-	QuotaDailyLimit  *float64       `json:"quota_daily_limit"`
-	QuotaDailyUsed   *float64       `json:"quota_daily_used"`
-	QuotaWeeklyLimit *float64       `json:"quota_weekly_limit"`
-	QuotaWeeklyUsed  *float64       `json:"quota_weekly_used"`
-	QuotaDailyReset  string         `json:"quota_daily_reset_at"`
-	QuotaWeeklyReset string         `json:"quota_weekly_reset_at"`
+	ID             int64          `json:"id"`
+	Name           string         `json:"name"`
+	Email          string         `json:"email"`
+	Platform       string         `json:"platform"`
+	Type           string         `json:"type"`
+	QuotaDimension string         `json:"quota_dimension"`
+	Status         string         `json:"status"`
+	ErrorMessage   string         `json:"error_message"`
+	UpdatedAt      string         `json:"updated_at"`
+	Extra          map[string]any `json:"extra"`
+	Credentials    struct {
+		Email    string `json:"email"`
+		PlanType string `json:"plan_type"`
+	} `json:"credentials"`
+	QuotaLimit       *float64 `json:"quota_limit"`
+	QuotaUsed        *float64 `json:"quota_used"`
+	QuotaDailyLimit  *float64 `json:"quota_daily_limit"`
+	QuotaDailyUsed   *float64 `json:"quota_daily_used"`
+	QuotaWeeklyLimit *float64 `json:"quota_weekly_limit"`
+	QuotaWeeklyUsed  *float64 `json:"quota_weekly_used"`
+	QuotaDailyReset  string   `json:"quota_daily_reset_at"`
+	QuotaWeeklyReset string   `json:"quota_weekly_reset_at"`
 }
 
 type sub2APIUsageInfo struct {
@@ -217,7 +222,7 @@ func supportsSub2APIPassiveUsage(account sub2APIAccount) bool {
 func projectSub2APIAccount(account sub2APIAccount, usage sub2APIUsageInfo, usageError bool) quotaAccount {
 	provider := canonicalSub2APIProvider(account.Platform, account.Type)
 	accountID := pseudonym("sub2api-account:" + strconv.FormatInt(account.ID, 10))
-	displayName := cleanText(account.Name, 160)
+	displayName := sub2APIAccountDisplayName(account)
 	if displayName == "" {
 		displayName = provider + " " + accountID[5:11]
 	}
@@ -277,7 +282,7 @@ func projectSub2APIAccount(account sub2APIAccount, usage sub2APIUsageInfo, usage
 		plan = cleanText(usage.SubscriptionRaw, 80)
 	}
 	if plan == "" {
-		plan = cleanText(stringValue(account.Extra["plan_type"], account.Extra["subscription_tier"]), 80)
+		plan = cleanText(stringValue(account.Extra["plan_type"], account.Extra["subscription_tier"], account.Credentials.PlanType), 80)
 	}
 	return quotaAccount{
 		ID:            accountID,
@@ -291,6 +296,18 @@ func projectSub2APIAccount(account sub2APIAccount, usage sub2APIUsageInfo, usage
 		Windows:       windows,
 		UpdatedAtMS:   max(updatedAt, accountUpdatedAt, parseSub2APITime(stringValue(account.Extra["codex_usage_updated_at"]))),
 	}
+}
+
+func sub2APIAccountDisplayName(account sub2APIAccount) string {
+	for _, value := range []string{account.Credentials.Email, stringValue(account.Extra["email"]), account.Email} {
+		email := strings.TrimSpace(value)
+		if len(email) <= 160 && strings.Count(email, "@") == 1 && !strings.ContainsAny(email, " \t\r\n") {
+			if safe := cleanText(email, 160); safe == email {
+				return safe
+			}
+		}
+	}
+	return cleanText(account.Name, 160)
 }
 
 func appendSub2APICodexSnapshot(windows *[]quotaWindow, extra map[string]any, dimension string) {
@@ -308,6 +325,8 @@ func appendSub2APICodexSnapshot(windows *[]quotaWindow, extra map[string]any, di
 	}
 	appendSub2APICodexWindow(windows, extra, "5h", "5 小时额度", "five_hour", pool, observedAt)
 	appendSub2APICodexWindow(windows, extra, "7d", "7 天额度", "weekly", pool, observedAt)
+	appendSub2APICodexWindow(windows, extra, "primary", "已观测额度", "", pool, observedAt)
+	appendSub2APICodexWindow(windows, extra, "secondary", "已观测额度", "", pool, observedAt)
 }
 
 func appendSub2APICodexWindow(windows *[]quotaWindow, extra map[string]any, slot, label, kind, pool string, observedAt int64) {
@@ -329,6 +348,11 @@ func appendSub2APICodexWindow(windows *[]quotaWindow, extra map[string]any, slot
 	validUsed = validUsed && used >= 0
 	if !validUsed && resetAt == 0 {
 		return
+	}
+	for _, existing := range *windows {
+		if existing.Pool == pool && existing.WindowMins == minutes && existing.ResetAtMS == resetAt && existing.Used == clamp(used) && existing.UnknownUsed == !validUsed {
+			return
+		}
 	}
 	*windows = append(*windows, quotaWindow{
 		ID:               prefix + "snapshot",
