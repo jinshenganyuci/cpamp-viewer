@@ -97,6 +97,25 @@ curl -fsS http://127.0.0.1:18417/health
 
 默认是公开只读模式，拿到访问地址即可查看，无需登录密码。通过域名提供服务时，把反向代理指向 `http://127.0.0.1:18417`。需要直接通过服务器 IP 访问时，将 `CPAMP_VIEWER_BIND=0.0.0.0` 后重建容器，并按需要限制防火墙或代理访问范围。
 
+## 接入多个 CPA / Sub2API
+
+多实例功能需要从本仓库源码构建，已发布的 `2.6.0` 镜像不包含此扩展。保留 `CPAMP_BASE_URL` 和对应管理密钥作为主 CPA；额外的 CPA、CPA Manager Plus 和 Sub2API 实例通过 `VIEWER_QUOTA_SOURCES`（JSON 数组）或 `VIEWER_QUOTA_SOURCES_FILE`（JSON 文件）配置，二选一。现有单实例环境变量继续有效，列表中的条目是追加来源，不要重复填写已有来源。
+
+所有来源的账号都合并到现有“配额管理”，卡片标明类型与实例名称，并可按实例名称搜索。同一邮箱在不同实例中分别保留，额度缓存和密钥相互独立；某个来源失败时保留其他可用来源。其他页面和 `/health` 继续使用主 CPA。包含主 CPA 和旧式 Sub2API 配置在内，最多接入 16 个来源。
+
+文件格式见 [`deploy/quota-sources.example.json`](deploy/quota-sources.example.json)。`type` 为 `cpa`（也接受 `cpamp`）时填写 `admin_key`，为 `sub2api` 时填写 `admin_api_key` 或 `admin_jwt` 中的一项。所有凭据字段也支持相应的 `_file` 字段，例如 `admin_key_file`，文件路径必须能在 Viewer 进程中读取。`name` 是公开显示名，不填写时自动编号；地址和管理员密钥不会返回浏览器。套餐保留原始值。
+
+Docker 使用 `compose.quota-sources.yaml` 挂载一份私密 JSON 文件。将示例复制到 `./secrets/quota_sources.json`，填写真实来源后，保证容器用户（UID/GID 65532）可读取该文件；不要提交真实配置。构建并启动：
+
+```bash
+docker compose -f docker-compose.viewer.yml -f compose.quota-sources.yaml build cpamp-viewer
+docker compose -f docker-compose.viewer.yml -f compose.quota-sources.yaml up -d --no-deps cpamp-viewer
+```
+
+之后的重建和停止也保留这个叠加文件。如果继续使用旧式 Sub2API 配置，同时保留 `-f compose.sub2api.yaml`；改用列表配置时则移除旧式 `SUB2API_*` 配置，避免重复来源。通过 `_file` 引用其他密钥文件时，还需自行挂载那些文件。原生运行时可直接设置 `VIEWER_QUOTA_SOURCES_FILE=/path/to/quota_sources.json`。
+
+如果原有 Sub2API 地址已经更换为 CPA，将该条目的 `type` 改为 `cpa`，使用 CPA Management Key，并移除该地址旧的 Sub2API 配置。
+
 ## 同时接入 Sub2API
 
 连接 CPA Manager Plus 的同时，可额外读取 Sub2API 管理端的账号列表、Anthropic OAuth/Setup Token 的**被动用量快照**、OpenAI Codex 账号列表中已保存的 5H/7D 或其他明确时长的窗口，以及已配置的 API Key 账号额度。在现有“配额管理”页合并展示，并通过卡片上的“CPA Manager Plus / Sub2API”标识区分来源；其他页面继续显示 CPA Manager Plus 数据。Sub2API 账号优先显示已有的邮箱和套餐，两种来源的套餐均保留原始值。OpenAI 账号不请求仅支持 Anthropic 的 `source=passive` 接口；没有有效的已保存窗口时显示“暂无已记录的额度快照”，不会推测不存在的 5H 窗口，也不会主动探测上游、刷新凭据或修改账号。Sub2API 账号数量上限为 2000，超过时页面显示该来源不可用提示，不会静默遗漏；任一来源不可用时仍尽量展示另一来源。

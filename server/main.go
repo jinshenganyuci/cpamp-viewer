@@ -49,7 +49,7 @@ func main() {
 		_ = server.Shutdown(shutdownCtx)
 	}()
 
-	logger.Info("CPAMP Viewer started", "addr", cfg.HTTPAddr, "upstream", safeUpstream(cfg.CPAMPBaseURL), "sub2api_enabled", cfg.Sub2APIBaseURL != "", "public_access", cfg.PublicAccess)
+	logger.Info("CPAMP Viewer started", "addr", cfg.HTTPAddr, "upstream", safeUpstream(cfg.CPAMPBaseURL), "sub2api_enabled", cfg.Sub2APIBaseURL != "", "additional_quota_sources", len(cfg.QuotaSources), "public_access", cfg.PublicAccess)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)

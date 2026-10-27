@@ -107,6 +107,8 @@ Viewer 根据完整结果的 `rate_limit` 和 `additional_rate_limits` 分开显
 
 ## 同时接入 Sub2API
 
+需要接入多个 CPA/Sub2API 时，使用源码构建及 `compose.quota-sources.yaml`，配置格式和命令见 [多实例来源](../README.md#接入多个-cpa--sub2api)。该扩展不包含在已发布的 2.6.0 镜像中；本节以下是旧式单 Sub2API 连接方式，仍然兼容。多实例列表只增加配额页来源，主 CPA 仍提供其他页面和健康检查。
+
 使用 `jinshenganyuci/cpamp-viewer:2.6.0` 或本次发布的 `latest` 即可，无需从源码重新构建。现有自定义 Compose 也可直接在 `environment` 映射 `SUB2API_BASE_URL` 和 `SUB2API_ADMIN_API_KEY`，对应值写在 `.env`，然后按原方式拉取并重建；参见 [最少改动的示例](../README.md#现有自定义-compose只加两项环境变量)。不要同时配置直接密钥和文件密钥。
 
 以下为仓库自带 Compose 的文件密钥方案。保留 CPAMP 地址和密钥，在已有 `.env` 中增加：
