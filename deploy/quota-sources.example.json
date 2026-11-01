@@ -1,0 +1,20 @@
+[
+  {
+    "type": "cpa",
+    "name": "CPA 二号",
+    "base_url": "https://cpa-two.example.com",
+    "admin_key": "replace-with-cpa-management-key"
+  },
+  {
+    "type": "sub2api",
+    "name": "Sub2API 一号",
+    "base_url": "https://sub-one.example.com",
+    "admin_api_key": "replace-with-sub2api-admin-api-key"
+  },
+  {
+    "type": "sub2api",
+    "name": "Sub2API 二号",
+    "base_url": "https://sub-two.example.com",
+    "admin_api_key": "replace-with-another-sub2api-admin-api-key"
+  }
+]

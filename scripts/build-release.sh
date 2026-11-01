@@ -92,6 +92,9 @@ for base_compose in compose.yaml docker-compose.viewer.yml; do
   CPAMP_ADMIN_KEY_PATH=/dev/null VIEWER_SESSION_SECRET_PATH=/dev/null \
   SUB2API_BASE_URL=http://sub2api.example.invalid:8080 SUB2API_ADMIN_API_KEY_PATH=/dev/null \
     docker compose -f "${ROOT_DIR}/${base_compose}" -f "${ROOT_DIR}/compose.sub2api.yaml" config --quiet
+  CPAMP_VIEWER_VERSION="${VERSION}" CLIPROXY_NETWORK=bridge \
+  CPAMP_ADMIN_KEY_PATH=/dev/null VIEWER_SESSION_SECRET_PATH=/dev/null VIEWER_QUOTA_SOURCES_PATH=/dev/null \
+    docker compose -f "${ROOT_DIR}/${base_compose}" -f "${ROOT_DIR}/compose.quota-sources.yaml" config --quiet
 done
 docker buildx build --check \
   --platform linux/amd64 \
@@ -233,7 +236,9 @@ cp "${ROOT_DIR}/docker-compose.access-guard.acceptance.yml" "${DEPLOYMENT_DIR}/"
 cp "${ROOT_DIR}/access-guard-public-keys.example.json" "${DEPLOYMENT_DIR}/"
 cp "${ROOT_DIR}/.env.example" "${DEPLOYMENT_DIR}/.env.example"
 cp "${ROOT_DIR}/README.md" "${DEPLOYMENT_DIR}/"
-cp "${ROOT_DIR}/compose.yaml" "${ROOT_DIR}/compose.sub2api.yaml" "${DEPLOYMENT_DIR}/"
+cp "${ROOT_DIR}/compose.yaml" "${ROOT_DIR}/compose.sub2api.yaml" "${ROOT_DIR}/compose.quota-sources.yaml" "${DEPLOYMENT_DIR}/"
+mkdir -p "${DEPLOYMENT_DIR}/deploy"
+cp "${ROOT_DIR}/deploy/quota-sources.example.json" "${DEPLOYMENT_DIR}/deploy/"
 cp "${ROOT_DIR}/LICENSE" "${ROOT_DIR}/CONTRIBUTING.md" "${ROOT_DIR}/SECURITY.md" "${DEPLOYMENT_DIR}/"
 cp -a "${ROOT_DIR}/docs" "${DEPLOYMENT_DIR}/docs"
 cp "${VERSION_FILE}" "${DEPLOYMENT_DIR}/VERSION"
@@ -247,6 +252,8 @@ printf '%s\n' \
   '  viewer_session_secret.txt' \
   'Optional Sub2API overlay additionally reads:' \
   '  sub2api_admin_api_key.txt' \
+  'Optional multi-source overlay additionally reads:' \
+  '  quota_sources.json (copy and edit deploy/quota-sources.example.json)' \
   'Optional Access Guard overlay additionally reads:' \
   '  access_guard_management_key.txt' \
   '  access_guard_public_keys.json (copy and edit the empty example)' \

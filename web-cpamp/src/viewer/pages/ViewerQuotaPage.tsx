@@ -226,9 +226,17 @@ function ViewerQuotaCard({
         {account.source ? (
           <span className={viewerStyles.sourceBadge}>
             {account.source === "sub2api" ? "Sub2API" : "CPA Manager Plus"}
+            {account.source_name ? ` · ${account.source_name}` : ""}
           </span>
         ) : null}
-        <span className={styles.fileName} title={account.display_name}>
+        <span
+          className={styles.fileName}
+          title={
+            showFull
+              ? account.display_name
+              : maskDisplayName(account.display_name)
+          }
+        >
           {showFull
             ? account.display_name
             : maskDisplayName(account.display_name)}
@@ -405,6 +413,8 @@ export function ViewerQuotaPage() {
         !query ||
         [
           account.display_name,
+          account.source,
+          account.source_name,
           account.provider,
           normalizeViewerQuotaProvider(account.provider),
           providerLabels[normalizeViewerQuotaProvider(account.provider)],
@@ -474,7 +484,7 @@ export function ViewerQuotaPage() {
             label="搜索凭证"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="搜索名称、类型、账号 ID、套餐或错误状态"
+            placeholder="搜索名称、来源、类型、套餐或错误状态"
             rightElement={<IconSearch size={16} />}
             aria-label="搜索凭证"
           />

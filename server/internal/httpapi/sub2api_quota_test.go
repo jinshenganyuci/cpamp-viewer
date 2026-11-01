@@ -113,7 +113,7 @@ func TestSub2APIOpenAIUsesSavedQuotaWithoutUnsupportedPassiveRequest(t *testing.
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		_, _ = io.WriteString(w, `{"code":0,"data":{"items":[{"id":4,"name":"OpenAI Account","platform":"openai","type":"oauth","status":"active","extra":{"codex_usage_updated_at":"2026-09-30T01:00:00Z","codex_5h_used_percent":0,"codex_5h_window_minutes":0,"codex_5h_reset_at":"2026-09-30T01:00:00Z","codex_7d_used_percent":18,"codex_7d_window_minutes":10080,"codex_7d_reset_at":"2099-01-07T00:00:00Z","access_token":"secret-must-not-leak"}}],"total":1,"pages":1}}`)
+		_, _ = io.WriteString(w, `{"code":0,"data":{"items":[{"id":4,"name":"OpenAI Account","platform":"openai","type":"oauth","status":"active","credentials":{"email":"real@example.test","plan_type":"pro","access_token":"secret-must-not-leak"},"extra":{"email":"other@example.test","codex_usage_updated_at":"2026-09-30T01:00:00Z","codex_5h_used_percent":0,"codex_5h_window_minutes":0,"codex_5h_reset_at":"2026-09-30T01:00:00Z","codex_7d_used_percent":18,"codex_7d_window_minutes":10080,"codex_7d_reset_at":"2099-01-07T00:00:00Z","access_token":"secret-must-not-leak"}}],"total":1,"pages":1}}`)
 	}))
 	defer upstream.Close()
 	server := &Server{sub2api: sub2api.New(upstream.URL, "private-sub2api-key", "", time.Second, 1<<20)}
@@ -121,7 +121,7 @@ func TestSub2APIOpenAIUsesSavedQuotaWithoutUnsupportedPassiveRequest(t *testing.
 	if err != nil || len(accounts) != 1 || usageRequested {
 		t.Fatalf("OpenAI snapshot result = %#v, %v, usage requested = %t", accounts, err, usageRequested)
 	}
-	if len(accounts[0].Windows) != 1 || accounts[0].Windows[0].WindowMins != 10080 || accounts[0].Windows[0].Used != 18 || accounts[0].StatusMessage != "" {
+	if accounts[0].DisplayName != "real@example.test" || accounts[0].Plan != "pro" || len(accounts[0].Windows) != 1 || accounts[0].Windows[0].WindowMins != 10080 || accounts[0].Windows[0].Used != 18 || accounts[0].StatusMessage != "" {
 		t.Fatalf("unsupported passive usage broke saved Codex quota: %#v", accounts[0])
 	}
 	encoded, err := json.Marshal(accounts)
@@ -151,18 +151,42 @@ func TestSub2APIPassiveUsageRequiresAnthropicSubscription(t *testing.T) {
 func TestSub2APICodexSnapshotKeepsOnlyCurrentWindows(t *testing.T) {
 	observedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
 	extra := map[string]any{
-		"codex_usage_updated_at":       observedAt.Format(time.RFC3339),
-		"codex_5h_used_percent":        float64(25),
-		"codex_5h_window_minutes":      float64(300),
-		"codex_5h_reset_after_seconds": float64(7200),
-		"codex_7d_used_percent":        float64(80),
-		"codex_7d_window_minutes":      float64(10080),
-		"codex_7d_reset_at":            observedAt.Format(time.RFC3339),
+		"codex_usage_updated_at":              observedAt.Format(time.RFC3339),
+		"codex_5h_used_percent":               float64(25),
+		"codex_5h_window_minutes":             float64(300),
+		"codex_5h_reset_after_seconds":        float64(7200),
+		"codex_7d_used_percent":               float64(80),
+		"codex_7d_window_minutes":             float64(10080),
+		"codex_7d_reset_at":                   observedAt.Format(time.RFC3339),
+		"codex_primary_used_percent":          float64(25),
+		"codex_primary_window_minutes":        float64(300),
+		"codex_primary_reset_after_seconds":   float64(7200),
+		"codex_secondary_used_percent":        float64(45),
+		"codex_secondary_window_minutes":      float64(10080),
+		"codex_secondary_reset_after_seconds": float64(7200),
 	}
 	var windows []quotaWindow
 	appendSub2APICodexSnapshot(&windows, extra, "global")
-	if len(windows) != 1 || windows[0].ID != "codex_5h_snapshot" || windows[0].ResetAtMS != observedAt.Add(2*time.Hour).UnixMilli() || windows[0].Remaining != 75 {
+	if len(windows) != 2 || windows[0].ID != "codex_5h_snapshot" || windows[0].ResetAtMS != observedAt.Add(2*time.Hour).UnixMilli() || windows[0].Remaining != 75 || windows[1].WindowMins != 10080 || windows[1].Remaining != 55 {
 		t.Fatalf("expired or relative Codex windows were misread: %#v", windows)
+	}
+}
+
+func TestSub2APIAccountDisplayNamePrefersValidatedEmail(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		account     sub2APIAccount
+		displayName string
+	}{
+		{name: "extra fallback", account: sub2APIAccount{Name: "Alias", Extra: map[string]any{"email": "saved@example.test"}}, displayName: "saved@example.test"},
+		{name: "top level fallback", account: sub2APIAccount{Name: "Alias", Email: "top@example.test"}, displayName: "top@example.test"},
+		{name: "invalid email", account: sub2APIAccount{Name: "Alias", Extra: map[string]any{"email": "Bearer secret@example.test"}}, displayName: "Alias"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := sub2APIAccountDisplayName(test.account); got != test.displayName {
+				t.Fatalf("account name = %q, want %q", got, test.displayName)
+			}
+		})
 	}
 }
 
@@ -293,7 +317,11 @@ func TestSub2APICodexQuotaDimensionPreservesPool(t *testing.T) {
 					"codex_5h_used_percent": 25, "codex_5h_window_minutes": 300,
 					"codex_5h_reset_at":     "2099-01-01T00:00:00Z",
 					"codex_7d_used_percent": 60, "codex_7d_window_minutes": 10080,
-					"codex_7d_reset_at": "2099-01-07T00:00:00Z",
+					"codex_7d_reset_at":          "2099-01-07T00:00:00Z",
+					"codex_primary_used_percent": 25, "codex_primary_window_minutes": 300,
+					"codex_primary_reset_at":       "2099-01-01T00:00:00Z",
+					"codex_secondary_used_percent": 40, "codex_secondary_window_minutes": 1440,
+					"codex_secondary_reset_at": "2099-01-01T00:00:00Z",
 				},
 			}
 			if test.dimension != "" {
@@ -311,15 +339,15 @@ func TestSub2APICodexQuotaDimensionPreservesPool(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := projectSub2APIAccount(account, sub2APIUsageInfo{}, false)
-			if len(got.Windows) != 2 {
-				t.Fatalf("expected both saved windows, got %#v", got.Windows)
+			if len(got.Windows) != 3 {
+				t.Fatalf("expected three unique saved windows, got %#v", got.Windows)
 			}
 			for _, window := range got.Windows {
 				if window.Pool != test.wantPool {
 					t.Errorf("%s pool = %q, want %q", window.ID, window.Pool, test.wantPool)
 				}
 			}
-			if got.Windows[0].Remaining != 75 || got.Windows[1].Remaining != 40 {
+			if got.Windows[0].Remaining != 75 || got.Windows[1].Remaining != 40 || got.Windows[2].Remaining != 60 {
 				t.Fatalf("pool selection changed quota values: %#v", got.Windows)
 			}
 		})

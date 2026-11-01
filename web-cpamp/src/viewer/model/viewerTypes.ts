@@ -398,6 +398,8 @@ export type ViewerQuotaWindow = {
 export type ViewerQuotaAccount = {
   id: string;
   source?: "cpamp" | "sub2api";
+  source_id?: string;
+  source_name?: string;
   provider: string;
   display_name: string;
   plan?: string;

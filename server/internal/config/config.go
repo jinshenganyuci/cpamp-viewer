@@ -29,6 +29,7 @@ type Config struct {
 	Sub2APIBaseURL           string
 	Sub2APIAdminAPIKey       string
 	Sub2APIAdminJWT          string
+	QuotaSources             []QuotaSource
 	PublicAccess             bool
 	ViewerPassword           string
 	SessionSecret            []byte
@@ -130,6 +131,10 @@ func Load() (Config, error) {
 		MaxEventsPage:        int(int64Env("VIEWER_MAX_EVENTS_PAGE", 200)),
 	}
 	if err := loadAccessGuard(&cfg); err != nil {
+		return Config{}, err
+	}
+	cfg.QuotaSources, err = loadQuotaSources(cfg)
+	if err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

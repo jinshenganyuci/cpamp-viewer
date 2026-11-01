@@ -10,6 +10,8 @@ import (
 
 func prepareConfigTest(t *testing.T) {
 	t.Helper()
+	t.Setenv("VIEWER_QUOTA_SOURCES", "")
+	t.Setenv("VIEWER_QUOTA_SOURCES_FILE", "")
 	t.Setenv("SUB2API_BASE_URL", "")
 	t.Setenv("SUB2API_ADMIN_API_KEY", "")
 	t.Setenv("SUB2API_ADMIN_API_KEY_FILE", "")

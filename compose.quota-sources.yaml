@@ -1,0 +1,10 @@
+services:
+  cpamp-viewer:
+    environment:
+      VIEWER_QUOTA_SOURCES_FILE: /run/secrets/quota_sources
+    secrets:
+      - quota_sources
+
+secrets:
+  quota_sources:
+    file: ${VIEWER_QUOTA_SOURCES_PATH:-./secrets/quota_sources.json}
