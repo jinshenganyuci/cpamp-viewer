@@ -4,7 +4,7 @@
 
 # CPAMP Viewer
 
-对应应用版本：`2.6.0`（默认公开只读，无登录密码）。
+对应应用版本：`2.7.0`（默认公开只读，无登录密码）。
 
 CPA Manager Plus 的独立只读观察台，只展示：
 
@@ -33,13 +33,13 @@ CPA Manager Plus 的独立只读观察台，只展示：
 - License：MIT，见 `web-cpamp/UPSTREAM_LICENSE`
 - 来源说明：`web-cpamp/UPSTREAM.md`
 
-Viewer 2.6.0 的共享界面以 CPAMP v1.12.8 为基础，并选择性适配 v1.14.1 的只读统计、来源识别、额度快照与用量状态；数据通过 Viewer 的只读 API 获取，左侧导航为六个页面。配额管理保留 Viewer 自有的脱敏展示逻辑。生产构建使用同源的 HTML + JS + CSS 三文件，以继续保持 `script-src 'self'`，不需要为内联脚本放宽 CSP。
+Viewer 2.7.0 的共享界面以 CPAMP v1.12.8 为基础，并选择性适配 v1.14.1 的只读统计、来源识别、额度快照与用量状态；数据通过 Viewer 的只读 API 获取，左侧导航为六个页面。配额管理保留 Viewer 自有的脱敏展示逻辑。生产构建使用同源的 HTML + JS + CSS 三文件，以继续保持 `script-src 'self'`，不需要为内联脚本放宽 CSP。
 
-## 2.6.0 新增 Sub2API 额度来源
+## 2.7.0 新增多实例额度来源
 
-正式 Docker 镜像现在包含 Sub2API 适配器。可在“配额管理”合并查看 CPA Manager Plus 和 Sub2API 账号，并保留来源标识；其他页面继续使用 CPAMP。修复 Spark 窗口误归入普通 Codex、未采样的 Anthropic 额度误显示为 100% 两处问题。接入方法见下文“同时接入 Sub2API”。
+正式 Docker 镜像支持多个 CPA / Sub2API 实例，在“配额管理”合并显示账号，并按实例名称区分和搜索。额外来源通过 `VIEWER_QUOTA_SOURCES` 内联 JSON 或 `VIEWER_QUOTA_SOURCES_FILE` 配置，其他页面与健康检查继续使用主 CPAMP。现有 `.env` 部署可在原 Compose 中增加一项映射，无需本地构建或额外脚本，见 [接入多个来源](../README.md#接入多个-cpa--sub2api)。
 
-只连接 CPAMP 的现有用户不需要增加参数。Sub2API 是可选的第二个来源，不能替代必需的 CPAMP 连接。
+2.6.0 已提供单个 Sub2API 来源，并修复 Spark 额度池归类与未采样 Anthropic 误显满额；2.7.0 继续兼容原 `SUB2API_*` 配置。只连接 CPAMP 的用户不需要新增参数；多实例列表仅填写新增来源，不重复主 CPAMP 或原 Sub2API。
 
 ## 已包含的 CPAMP 只读功能
 
@@ -52,13 +52,13 @@ Viewer 2.6.0 的共享界面以 CPAMP v1.12.8 为基础，并选择性适配 v1.
 
 新字段需要 CPAMP 实际提供；旧版本缺少快照/用量状态接口时按能力降级，不会把失败当成零额度或满额。仅使用这些 CPAMP 功能时，不需要新增环境变量或密钥文件。
 
-镜像同时发布 `jinshenganyuci/cpamp-viewer:2.6.0` 和 `jinshenganyuci/cpamp-viewer:latest`，发布时两个标签指向同一镜像；具体 digest 与校验文件见对应 GitHub Release。生产部署可固定版本号，或使用 latest 后主动拉取重建。
+镜像同时发布 `jinshenganyuci/cpamp-viewer:2.7.0` 和 `jinshenganyuci/cpamp-viewer:latest`，发布时两个标签指向同一镜像；具体 digest 与校验文件见对应 GitHub Release。生产部署可固定版本号，或使用 latest 后主动拉取重建。
 
 ## 安全边界
 
 Viewer 不挂载 `usage.sqlite`，不启动第二个采集器，也不提供通用 CPAMP 代理。
 
-2.6.0 默认启用 `VIEWER_PUBLIC_ACCESS=true`：任何能够访问 Viewer 地址的人都可以直接查看六个只读页面，不需要密码，也不会获得会话 Cookie。公开模式下“退出登录”按钮不会显示。若域名不应对所有人开放，请在 Nginx Proxy Manager、CDN 或防火墙层限制访问者。
+2.7.0 默认启用 `VIEWER_PUBLIC_ACCESS=true`：任何能够访问 Viewer 地址的人都可以直接查看六个只读页面，不需要密码，也不会获得会话 Cookie。公开模式下“退出登录”按钮不会显示。若域名不应对所有人开放，请在 Nginx Proxy Manager、CDN 或防火墙层限制访问者。
 
 浏览器只访问：
 
@@ -107,9 +107,9 @@ Viewer 根据完整结果的 `rate_limit` 和 `additional_rate_limits` 分开显
 
 ## 同时接入 Sub2API
 
-需要接入多个 CPA/Sub2API 时，使用源码构建及 `compose.quota-sources.yaml`，配置格式和命令见 [多实例来源](../README.md#接入多个-cpa--sub2api)。该扩展不包含在已发布的 2.6.0 镜像中；本节以下是旧式单 Sub2API 连接方式，仍然兼容。多实例列表只增加配额页来源，主 CPA 仍提供其他页面和健康检查。
+接入多个 CPA/Sub2API 可直接使用 `2.7.0` 或本次发布的 `latest`，无需源码构建。原 `.env` 部署只需在 Compose 的 `environment` 增加 `VIEWER_QUOTA_SOURCES: ${VIEWER_QUOTA_SOURCES:-[]}`，再于 `.env` 填写新增来源的单行 JSON；或使用 `compose.yaml` 与 `compose.quota-sources.yaml` 的文件方案。完整示例见 [多实例来源](../README.md#接入多个-cpa--sub2api)。两种方式二选一，列表不重复已有来源。本节以下的原单 Sub2API 连接方式仍然兼容。多实例列表只增加配额页来源，主 CPA 仍提供其他页面和健康检查。
 
-使用 `jinshenganyuci/cpamp-viewer:2.6.0` 或本次发布的 `latest` 即可，无需从源码重新构建。现有自定义 Compose 也可直接在 `environment` 映射 `SUB2API_BASE_URL` 和 `SUB2API_ADMIN_API_KEY`，对应值写在 `.env`，然后按原方式拉取并重建；参见 [最少改动的示例](../README.md#现有自定义-compose只加两项环境变量)。不要同时配置直接密钥和文件密钥。
+使用 `jinshenganyuci/cpamp-viewer:2.7.0` 或本次发布的 `latest` 即可，无需从源码重新构建。现有自定义 Compose 也可直接在 `environment` 映射 `SUB2API_BASE_URL` 和 `SUB2API_ADMIN_API_KEY`，对应值写在 `.env`，然后按原方式拉取并重建；参见 [最少改动的示例](../README.md#现有自定义-compose只加两项环境变量)。不要同时配置直接密钥和文件密钥。
 
 以下为仓库自带 Compose 的文件密钥方案。保留 CPAMP 地址和密钥，在已有 `.env` 中增加：
 
@@ -257,7 +257,7 @@ cp .env.example .env
 编辑 `.env`：
 
 ```env
-CPAMP_VIEWER_VERSION=2.6.0
+CPAMP_VIEWER_VERSION=2.7.0
 VIEWER_PUBLIC_ACCESS=true
 CLIPROXY_NETWORK=mycpa_cliproxy
 CPAMP_BASE_URL=http://cpa-manager-plus:18317
@@ -287,9 +287,9 @@ VIEWER_SECURE_COOKIES=true
 
 ## 拉取、构建并启动
 
-从 2.1.0 / 2.2.0 / 2.3.0 升级时，原有页面不需要修改数据库或密钥；启用 Key 额度页只需上文的公开范围设置。在线镜像名为 `jinshenganyuci/cpamp-viewer:2.6.0`；离线包保留本地标签 `cpamp-viewer:2.6.0`。
+从 2.1.0 / 2.2.0 / 2.3.0 升级时，原有页面不需要修改数据库或密钥；启用 Key 额度页只需上文的公开范围设置。在线镜像名为 `jinshenganyuci/cpamp-viewer:2.7.0`；离线包保留本地标签 `cpamp-viewer:2.7.0`。
 
-使用离线包时，先执行下文的 `docker load`，再把 `.env` 中的 `CPAMP_VIEWER_VERSION` 改为 `2.6.0` 并运行 `docker compose -f docker-compose.viewer.yml up -d --no-build`。Viewer 自身不保存请求历史，因此容器重建不会丢失运行期间的数据；历史仍来自现有 CPAMP。
+使用离线包时，先执行下文的 `docker load`，再把 `.env` 中的 `CPAMP_VIEWER_VERSION` 改为 `2.7.0` 并运行 `docker compose -f docker-compose.viewer.yml up -d --no-build`。Viewer 自身不保存请求历史，因此容器重建不会丢失运行期间的数据；历史仍来自现有 CPAMP。
 
 在线镜像直接拉取：
 
@@ -298,7 +298,7 @@ docker compose pull cpamp-viewer
 docker compose up -d --no-deps cpamp-viewer
 ```
 
-通过叠加文件启用 Sub2API 时使用上文的双文件命令。
+通过叠加文件启用 Sub2API 或多实例时，保留已使用的 `-f compose.sub2api.yaml` / `-f compose.quota-sources.yaml`；内联 JSON 方案继续使用原 Compose 命令。
 
 从源码构建：
 
@@ -310,17 +310,17 @@ docker compose -f docker-compose.viewer.yml up -d
 如果使用随项目提供的离线镜像，先校验并加载镜像，再显式禁止 Compose 重新构建：
 
 ```bash
-sha256sum -c cpamp-viewer_2.6.0_linux_amd64.tar.gz.sha256
-docker load -i cpamp-viewer_2.6.0_linux_amd64.tar.gz
+sha256sum -c cpamp-viewer_2.7.0_linux_amd64.tar.gz.sha256
+docker load -i cpamp-viewer_2.7.0_linux_amd64.tar.gz
 docker compose -f docker-compose.viewer.yml up -d --no-build
 ```
 
-完整 Docker 部署包同时包含在线、离线和验收 Compose、`compose.sub2api.yaml`、`.env.example`、README、VERSION、所有许可证、离线镜像和包内 `SHA256SUMS`：
+完整 Docker 部署包同时包含在线、离线和验收 Compose、`compose.sub2api.yaml`、`compose.quota-sources.yaml`、`deploy/quota-sources.example.json`、`.env.example`、README、VERSION、所有许可证、离线镜像和包内 `SHA256SUMS`：
 
 ```bash
-sha256sum -c cpamp-viewer_2.6.0_deployment.tar.gz.sha256
-tar -xzf cpamp-viewer_2.6.0_deployment.tar.gz
-cd cpamp-viewer_2.6.0_deployment
+sha256sum -c cpamp-viewer_2.7.0_deployment.tar.gz.sha256
+tar -xzf cpamp-viewer_2.7.0_deployment.tar.gz
+cd cpamp-viewer_2.7.0_deployment
 sha256sum -c SHA256SUMS
 cp .env.example .env
 ```
@@ -333,7 +333,7 @@ cp .env.example .env
 http://127.0.0.1:18417/management.html#/
 ```
 
-若旧版已经占用 `18417`，可用验收 Compose 把 2.6.0 并行启动在 `18418`。从源码目录验收时运行：
+若旧版已经占用 `18417`，可用验收 Compose 把 2.7.0 并行启动在 `18418`。从源码目录验收时运行：
 
 ```bash
 CPAMP_ADMIN_KEY_PATH=./secrets/cpamp_admin_key.txt \
@@ -371,20 +371,20 @@ docker compose -f docker-compose.acceptance.yml down
 启动真实数据测试.cmd
 ```
 
-脚本启动后会询问 CPAMP 地址，将 2.6.0 启动在本机 `18418`，并使用独立容器名，不会删除 `18417` 旧容器。它会先校验并加载随包提供的离线镜像，再提示输入 CPAMP 管理密钥；Viewer 页面无需登录密码。需要更换地址、端口或对局域网开放时可在 PowerShell 中运行：
+脚本启动后会询问 CPAMP 地址，将 2.7.0 启动在本机 `18418`，并使用独立容器名，不会删除 `18417` 旧容器。它会先校验并加载随包提供的离线镜像，再提示输入 CPAMP 管理密钥；Viewer 页面无需登录密码。需要更换地址、端口或对局域网开放时可在 PowerShell 中运行：
 
 ```powershell
 .\start-remote-test.ps1 -Upstream 'http://其他地址:18317' -Port 18418 -BindAddress '0.0.0.0'
 ```
 
-Docker Desktop 双击脚本位于 `cpamp-viewer_2.6.0_deployment` 包。原生 Windows 程序位于 `cpamp-viewer_2.6.0_windows_amd64.tar.gz`；先校验它的同名 `.sha256`，解压后再校验包内 `SHA256SUMS`。GitHub Release 以各归档旁的 `.tar.gz.sha256` 和总 `SHA256SUMS` 校验下载文件；解压后用包内 `SHA256SUMS` 校验内容。
+Docker Desktop 双击脚本位于 `cpamp-viewer_2.7.0_deployment` 包。原生 Windows 程序位于 `cpamp-viewer_2.7.0_windows_amd64.tar.gz`；先校验它的同名 `.sha256`，解压后再校验包内 `SHA256SUMS`。GitHub Release 以各归档旁的 `.tar.gz.sha256` 和总 `SHA256SUMS` 校验下载文件；解压后用包内 `SHA256SUMS` 校验内容。
 
 原生 Windows EXE 与 Docker Desktop 离线镜像是两种独立运行方式：
 
 - `cpamp-viewer.exe`：原生 Windows 服务程序。
 - `cpamp-viewer-remote-test.exe`：为现有脚本保留的同一程序副本。
 - `cpamp-viewer-healthcheck.exe`：默认检查 `http://127.0.0.1:18417/health`；其他端口请设置 `HEALTHCHECK_URL`。
-- `cpamp-viewer_2.6.0_linux_amd64.tar.gz`：供 Docker Desktop / Linux Docker 使用的离线镜像。
+- `cpamp-viewer_2.7.0_linux_amd64.tar.gz`：供 Docker Desktop / Linux Docker 使用的离线镜像。
 
 查看状态：
 
@@ -459,7 +459,7 @@ go build .
 ./scripts/build-release.sh
 ```
 
-脚本会从干净依赖开始执行前端检查、危险管理路径扫描、Go 测试、`linux/amd64` 镜像构建、Windows `amd64` 交叉编译、镜像内许可证验证和 SHA-256 生成。发布输出位于 `release/2.6.0/`，其中包含：
+脚本会从干净依赖开始执行前端检查、危险管理路径扫描、Go 测试、`linux/amd64` 镜像构建、Windows `amd64` 交叉编译、镜像内许可证验证和 SHA-256 生成。发布输出位于 `release/2.7.0/`，其中包含：
 
 - 独立 Linux `amd64` 离线镜像及校验文件。
 - 原生 Windows `amd64` 目录、标准化归档、包内 `SHA256SUMS` 和外层归档校验。

@@ -3,12 +3,12 @@
 [![CI](https://github.com/jinshenganyuci/cpamp-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/jinshenganyuci/cpamp-viewer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**给朋友看账号统计和额度的只读面板。** 默认连接 CPA Manager Plus；可额外接入 Sub2API，将两个来源的账号额度放在同一个页面。管理密钥留在服务端，浏览器没有修改账号或重置额度的权限。
+**给朋友看账号统计和额度的只读面板。** 默认连接 CPA Manager Plus；可额外接入多个 CPA Manager Plus 和 Sub2API，将各实例的账号额度放在同一个页面。管理密钥留在服务端，浏览器没有修改账号或重置额度的权限。
 
-当前应用版本 **2.6.0**，已适配 CPAMP **v1.14.1** 的相关只读功能。镜像提供 `linux/amd64`：
+当前应用版本 **2.7.0**，已适配 CPAMP **v1.14.1** 的相关只读功能。镜像提供 `linux/amd64`：
 
 ```text
-jinshenganyuci/cpamp-viewer:2.6.0
+jinshenganyuci/cpamp-viewer:2.7.0
 jinshenganyuci/cpamp-viewer:latest
 ```
 
@@ -21,7 +21,7 @@ jinshenganyuci/cpamp-viewer:latest
 | 仪表盘 | 请求、Token、费用、模型与服务状态 |
 | 用量分析 | 时间范围、模型、调用方、凭证统计；历史明细清理后的覆盖提示 |
 | 请求监控 | 请求模型、路由模型、实际响应模型与“模型不一致”提示 |
-| 配额管理 | Codex 普通池 / Spark 分开显示；Meta/Muse、Devin、xAI 等已保存快照；可选合并 Sub2API 账号额度 |
+| 配额管理 | Codex 普通池 / Spark 分开显示；Meta/Muse、Devin、xAI 等已保存快照；可选合并多个 CPA / Sub2API 实例的账号额度 |
 | Key 额度 | Access Guard 指定公开条目的名称、剩余额度与重置时间 |
 | 用量状态 | 在线/已归档/已清理记录、存储占用和维护状态，仅查看 |
 
@@ -47,7 +47,7 @@ mkdir -p secrets
 ```dotenv
 CPAMP_BASE_URL=https://你的CPAMP管理域名
 CLIPROXY_NETWORK=bridge
-CPAMP_VIEWER_VERSION=2.6.0
+CPAMP_VIEWER_VERSION=2.7.0
 CPAMP_VIEWER_BIND=127.0.0.1
 CPAMP_VIEWER_PORT=18417
 ```
@@ -99,20 +99,53 @@ curl -fsS http://127.0.0.1:18417/health
 
 ## 接入多个 CPA / Sub2API
 
-多实例功能需要从本仓库源码构建，已发布的 `2.6.0` 镜像不包含此扩展。保留 `CPAMP_BASE_URL` 和对应管理密钥作为主 CPA；额外的 CPA、CPA Manager Plus 和 Sub2API 实例通过 `VIEWER_QUOTA_SOURCES`（JSON 数组）或 `VIEWER_QUOTA_SOURCES_FILE`（JSON 文件）配置，二选一。现有单实例环境变量继续有效，列表中的条目是追加来源，不要重复填写已有来源。
+**`jinshenganyuci/cpamp-viewer:2.7.0` 和本次发布的 `latest` 已包含多来源功能，直接拉取即可。** 旧 `2.6.0` 镜像只支持主 CPAMP 和一个 Sub2API 来源。保留 `CPAMP_BASE_URL` 和对应管理密钥作为主 CPA；额外的 CPA、CPA Manager Plus 和 Sub2API 实例通过 `VIEWER_QUOTA_SOURCES`（JSON 数组）或 `VIEWER_QUOTA_SOURCES_FILE`（JSON 文件）配置，二选一。
 
-所有来源的账号都合并到现有“配额管理”，卡片标明类型与实例名称，并可按实例名称搜索。同一邮箱在不同实例中分别保留，额度缓存和密钥相互独立；某个来源失败时保留其他可用来源。其他页面和 `/health` 继续使用主 CPA。包含主 CPA 和旧式 Sub2API 配置在内，最多接入 16 个来源。
+所有来源的账号都合并到现有“配额管理”，卡片标明类型与实例名称，并可按实例名称搜索。同一邮箱在不同实例中分别保留，额度缓存和密钥相互独立；某个来源失败时保留其他可用来源。其他页面和 `/health` 继续使用主 CPA。包含主 CPA 和现有单 Sub2API 配置在内，最多接入 16 个来源。
 
-文件格式见 [`deploy/quota-sources.example.json`](deploy/quota-sources.example.json)。`type` 为 `cpa`（也接受 `cpamp`）时填写 `admin_key`，为 `sub2api` 时填写 `admin_api_key` 或 `admin_jwt` 中的一项。所有凭据字段也支持相应的 `_file` 字段，例如 `admin_key_file`，文件路径必须能在 Viewer 进程中读取。`name` 是公开显示名，不填写时自动编号；地址和管理员密钥不会返回浏览器。套餐保留原始值。
+### 现有 Compose 和 .env：追加来源
 
-Docker 使用 `compose.quota-sources.yaml` 挂载一份私密 JSON 文件。将示例复制到 `./secrets/quota_sources.json`，填写真实来源后，保证容器用户（UID/GID 65532）可读取该文件；不要提交真实配置。构建并启动：
+保留原 Compose 的端口、密钥文件、主 CPAMP、Sub2API 和 Access Guard 配置，仅确认镜像并在现有 `environment` 下追加一项：
 
-```bash
-docker compose -f docker-compose.viewer.yml -f compose.quota-sources.yaml build cpamp-viewer
-docker compose -f docker-compose.viewer.yml -f compose.quota-sources.yaml up -d --no-deps cpamp-viewer
+```yaml
+services:
+  cpamp-viewer:
+    image: jinshenganyuci/cpamp-viewer:latest
+    environment:
+      VIEWER_QUOTA_SOURCES: ${VIEWER_QUOTA_SOURCES:-[]}
 ```
 
-之后的重建和停止也保留这个叠加文件。如果继续使用旧式 Sub2API 配置，同时保留 `-f compose.sub2api.yaml`；改用列表配置时则移除旧式 `SUB2API_*` 配置，避免重复来源。通过 `_file` 引用其他密钥文件时，还需自行挂载那些文件。原生运行时可直接设置 `VIEWER_QUOTA_SOURCES_FILE=/path/to/quota_sources.json`。
+这是需合入原文件的片段。在原 `.env` 中追加一行，填写第二个 CPAMP 的管理地址和 Admin Key：
+
+```dotenv
+VIEWER_QUOTA_SOURCES='[{"type":"cpamp","name":"CPAMP 二号","base_url":"https://cpamp-two.example.com","admin_key":"替换为二号CPAMP的AdminKey"}]'
+```
+
+只在数组中填写新增实例，**不要重复填写原 `CPAMP_BASE_URL` 或已有 `SUB2API_BASE_URL` 来源**。新增 Sub2API 使用 `"type":"sub2api"` 和 `"admin_api_key":"替换为Sub2API管理员APIKey"`。`name` 是所有访客可见的实例名称；需要多个新增实例时，在同一个 JSON 数组内追加对象。
+
+```bash
+docker compose pull cpamp-viewer
+docker compose up -d --no-deps cpamp-viewer
+```
+
+`.env` 变量必须经过上面的 `environment` 映射才会传入容器。JSON 保持为单行，并用外层单引号包住，避免 Compose 对密钥中的 `$` 插值；不要提交真实 `.env`。这种方式不增加文件或脚本，也不要同时设置 `VIEWER_QUOTA_SOURCES_FILE`。管理员凭据保留在服务端容器环境变量中。
+
+### 仓库自带 Compose：私密 JSON 文件
+
+文件格式见 [`deploy/quota-sources.example.json`](deploy/quota-sources.example.json)。`type` 为 `cpa`（也接受 `cpamp`）时填写 `admin_key`，为 `sub2api` 时填写 `admin_api_key` 或 `admin_jwt` 中的一项。所有凭据字段也支持相应的 `_file` 字段，例如 `admin_key_file`，文件路径必须能在 Viewer 进程中读取。`name` 不填写时自动编号；地址和管理员密钥不会返回浏览器。套餐保留原始值。
+
+保留原 `.env`，先将其中 `CPAMP_VIEWER_VERSION` 设为 `2.7.0` 或 `latest`。将示例复制到 `./secrets/quota_sources.json`，填写真实来源后，让容器用户（UID/GID 65532）可读取该文件：
+
+```bash
+cp deploy/quota-sources.example.json secrets/quota_sources.json
+# 编辑 secrets/quota_sources.json，填写新增来源。
+sudo chown root:65532 secrets/quota_sources.json
+sudo chmod 0640 secrets/quota_sources.json
+docker compose -f compose.yaml -f compose.quota-sources.yaml pull cpamp-viewer
+docker compose -f compose.yaml -f compose.quota-sources.yaml up -d --no-build --no-deps cpamp-viewer
+```
+
+文件方案不要同时设置内联 `VIEWER_QUOTA_SOURCES`；之后的拉取、重建和停止也保留这个叠加文件。如果继续使用原有 Sub2API 文件方案，同时保留 `-f compose.sub2api.yaml`；把该来源迁入列表时则移除其旧 `SUB2API_*` 配置，避免重复。通过 `_file` 引用其他密钥文件时，还需自行挂载那些文件。原生运行时可直接设置 `VIEWER_QUOTA_SOURCES_FILE=/path/to/quota_sources.json`。
 
 如果原有 Sub2API 地址已经更换为 CPA，将该条目的 `type` 改为 `cpa`，使用 CPA Management Key，并移除该地址旧的 Sub2API 配置。
 
@@ -120,7 +153,7 @@ docker compose -f docker-compose.viewer.yml -f compose.quota-sources.yaml up -d 
 
 连接 CPA Manager Plus 的同时，可额外读取 Sub2API 管理端的账号列表、Anthropic OAuth/Setup Token 的**被动用量快照**、OpenAI Codex 账号列表中已保存的 5H/7D 或其他明确时长的窗口，以及已配置的 API Key 账号额度。在现有“配额管理”页合并展示，并通过卡片上的“CPA Manager Plus / Sub2API”标识区分来源；其他页面继续显示 CPA Manager Plus 数据。Sub2API 账号优先显示已有的邮箱和套餐，两种来源的套餐均保留原始值。OpenAI 账号不请求仅支持 Anthropic 的 `source=passive` 接口；没有有效的已保存窗口时显示“暂无已记录的额度快照”，不会推测不存在的 5H 窗口，也不会主动探测上游、刷新凭据或修改账号。Sub2API 账号数量上限为 2000，超过时页面显示该来源不可用提示，不会静默遗漏；任一来源不可用时仍尽量展示另一来源。
 
-**2.6.0 正式镜像已包含此功能，无需本地构建。** Sub2API 是可选的第二个额度来源，不能替代 CPAMP：仍须保留有效的 `CPAMP_BASE_URL` 和 CPAMP Admin Key。两个管理地址都必须从 Viewer 容器可达。
+**单个 Sub2API 来源自 2.6.0 起已包含在正式镜像中，2.7.0 继续兼容，无需本地构建。** Sub2API 是可选的第二个额度来源，不能替代 CPAMP：仍须保留有效的 `CPAMP_BASE_URL` 和 CPAMP Admin Key。两个管理地址都必须从 Viewer 容器可达。
 
 ### 现有自定义 Compose：只加两项环境变量
 
@@ -129,7 +162,7 @@ docker compose -f docker-compose.viewer.yml -f compose.quota-sources.yaml up -d 
 ```yaml
 services:
   cpamp-viewer:
-    image: jinshenganyuci/cpamp-viewer:2.6.0
+    image: jinshenganyuci/cpamp-viewer:2.7.0
     environment:
       SUB2API_BASE_URL: ${SUB2API_BASE_URL}
       SUB2API_ADMIN_API_KEY: ${SUB2API_ADMIN_API_KEY}
@@ -146,10 +179,10 @@ SUB2API_ADMIN_API_KEY=替换为Sub2API管理员APIKey
 
 ### 仓库自带 Compose：独立密钥文件
 
-已部署的用户保留原 `.env`，将版本改为 `2.6.0`，再新增 `SUB2API_BASE_URL` 和 `SUB2API_ADMIN_API_KEY_PATH`。下面是一份可用的 `.env` 示例；按实际情况替换管理地址，原有 Access Guard 公开设置继续保留：
+已部署的用户保留原 `.env`，将版本改为 `2.7.0`，再新增 `SUB2API_BASE_URL` 和 `SUB2API_ADMIN_API_KEY_PATH`。下面是一份可用的 `.env` 示例；按实际情况替换管理地址，原有 Access Guard 公开设置继续保留：
 
 ```dotenv
-CPAMP_VIEWER_VERSION=2.6.0
+CPAMP_VIEWER_VERSION=2.7.0
 VIEWER_PUBLIC_ACCESS=true
 TZ=Asia/Shanghai
 CPAMP_VIEWER_BIND=127.0.0.1
@@ -251,11 +284,14 @@ Viewer 不保存 CPAMP 请求历史；重建 Viewer 不会清除 CPAMP 数据。
 | --- | --- |
 | `CPAMP_BASE_URL` | CPAMP 管理地址，必须从 Viewer 容器内可达 |
 | `SUB2API_BASE_URL` | 可选的 Sub2API 管理地址，配置后与 CPAMP 并行读取额度 |
+| `VIEWER_QUOTA_SOURCES` | 额外 CPA / Sub2API 实例的 JSON 数组；需在自定义 Compose 中映射，与 `_FILE` 二选一 |
+| `VIEWER_QUOTA_SOURCES_FILE` | 服务端读取的私密 JSON 文件；仓库使用 `compose.quota-sources.yaml` 挂载 |
+| `VIEWER_QUOTA_SOURCES_PATH` | 文件方案在宿主机的路径，默认 `./secrets/quota_sources.json` |
 | `SUB2API_ADMIN_API_KEY_PATH` | 叠加 Compose 文件中的 Sub2API **管理员** API Key 文件，默认 `./secrets/sub2api_admin_api_key.txt` |
 | `CPAMP_ADMIN_KEY_PATH` | 管理密钥文件，默认 `./secrets/cpamp_admin_key.txt` |
 | `VIEWER_SESSION_SECRET_PATH` | 内部签名密钥文件，默认 `./secrets/viewer_session_secret.txt` |
 | `CLIPROXY_NETWORK` | 加入的现有 Docker 网络；远程 HTTPS 地址可用 `bridge` |
-| `CPAMP_VIEWER_VERSION` | 发布镜像标签，默认 `2.6.0` |
+| `CPAMP_VIEWER_VERSION` | 发布镜像标签，默认 `2.7.0` |
 | `CPAMP_VIEWER_BIND` / `CPAMP_VIEWER_PORT` | 宿主机绑定地址 / 端口，默认 `127.0.0.1:18417` |
 | `ACCESS_GUARD_PUBLIC_ALL` | 是否公开全部绑定，默认 `false` |
 | `ACCESS_GUARD_PUBLIC_KEYS` | 明确的公开名单，与上项互斥 |

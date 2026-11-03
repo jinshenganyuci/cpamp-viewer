@@ -1,10 +1,10 @@
 # 架构说明
 
-本文描述 Viewer 2.6.0 的源码结构、数据流和扩展边界。前端上游来源及选择性移植范围见 [UPSTREAM_BASELINE.md](UPSTREAM_BASELINE.md) 和 [web-cpamp/UPSTREAM.md](../web-cpamp/UPSTREAM.md)，协作和验证流程见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
+本文描述 Viewer 2.7.0 的源码结构、数据流和扩展边界。前端上游来源及选择性移植范围见 [UPSTREAM_BASELINE.md](UPSTREAM_BASELINE.md) 和 [web-cpamp/UPSTREAM.md](../web-cpamp/UPSTREAM.md)，协作和验证流程见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 ## 1. 运行组成
 
-Viewer 是独立的 Go HTTP 服务，向浏览器提供 React 页面和经过筛选的数据。它通过服务端配置连接 CPA Manager Plus（CPAMP），可额外连接 Sub2API 读取账号额度；不直接读取上游数据库文件，也不接管管理界面。
+Viewer 是独立的 Go HTTP 服务，向浏览器提供 React 页面和经过筛选的数据。它通过服务端配置连接 CPA Manager Plus（CPAMP），可额外连接多个 CPA / Sub2API 实例读取账号额度；不直接读取上游数据库文件，也不接管管理界面。
 
 | 目录或文件 | 职责 |
 | --- | --- |
@@ -124,7 +124,9 @@ flowchart LR
 
 ### 多实例配额来源
 
-`VIEWER_QUOTA_SOURCES` 或 `VIEWER_QUOTA_SOURCES_FILE` 提供额外的 CPA/Sub2API 来源列表，与主 CPA 和旧式单 Sub2API 配置一起加载。配置校验拒绝无效地址、重复端点、混用凭据、未知字段和超过 16 个来源的配置，错误信息不回显密钥。每个额外 CPA 拥有独立客户端和额度缓存，Sub2API 使用独立管理员凭据；汇总最多同时读取 4 个来源，单侧故障仅生成对应实例提示，全部故障才返回错误。成功的空账号列表也视为可用来源。
+2.7.0 正式镜像包含多实例支持。`VIEWER_QUOTA_SOURCES` 或 `VIEWER_QUOTA_SOURCES_FILE` 提供额外的 CPA/Sub2API 来源列表，两项互斥，与主 CPA 和旧式单 Sub2API 配置一起加载。配置校验拒绝无效地址、重复端点、混用凭据、未知字段和超过 16 个来源的配置，错误信息不回显密钥。每个额外 CPA 拥有独立客户端和额度缓存，Sub2API 使用独立管理员凭据；汇总最多同时读取 4 个来源，单侧故障仅生成对应实例提示，全部故障才返回错误。成功的空账号列表也视为可用来源。
+
+原有 `.env` 部署可通过 Compose `environment` 映射内联 JSON；文件方案由 `compose.quota-sources.yaml` 挂载，使用在线镜像无需源码构建。列表只增加新来源，不替换或重复主 CPAMP / 原 Sub2API。
 
 额外来源的账号 ID 以类型、地址生成的匿名来源标识隔离；名称、列表顺序和密钥变化不会改变账号身份。公开 DTO 只增加 `source_id` 和 `source_name`，不返回地址或凭据。主 CPA 和旧式 Sub2API 的账号 ID 保持兼容。配额页沿用现有布局并支持按实例名称搜索，其他 API 仍读取主 CPA。
 
