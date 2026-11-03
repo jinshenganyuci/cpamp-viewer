@@ -66,7 +66,7 @@ var (
 )
 
 const (
-	viewerVersion             = "2.5.0"
+	viewerVersion             = "2.7.0"
 	maxPublicEventsPage       = 500
 	maxDrilldownPreviewEvents = 100
 	eventsCursorAAD           = "cpamp-viewer/events-cursor/v1"
