@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { adaptUsageAnalyticsData } from "@/features/usage-analytics/usageAnalyticsModel";
+import {
+  adaptUsageAnalyticsData,
+  computeCacheHitRate,
+} from "@/features/usage-analytics/usageAnalyticsModel";
 import type { ViewerAnalyticsResponse } from "@/viewer/model/viewerTypes";
 import {
   adaptViewerAnalyticsResponse,
@@ -110,16 +113,14 @@ describe("viewer usage analytics adapter", () => {
       account_count: 7,
       api_key_count: 3,
     });
-    expect(buildViewerAuthFileDisplayMap(response).get("view_f11e00000001")).toBe(
-      "codex-account.json",
-    );
+    expect(
+      buildViewerAuthFileDisplayMap(response).get("view_f11e00000001"),
+    ).toBe("codex-account.json");
     const presentation = adaptUsageAnalyticsData(
       adapted,
       "hour",
       "",
-      buildViewerApiKeyDisplayMap([
-        { id: "view_0123456789ab", alias: "马哥" },
-      ]),
+      buildViewerApiKeyDisplayMap([{ id: "view_0123456789ab", alias: "马哥" }]),
     );
     expect(presentation.apiKeyRows[0]?.label).toBe("马哥");
     expect(presentation.credentialRows[0]?.label).toBe("codex-account.json");
@@ -237,4 +238,65 @@ describe("viewer usage analytics adapter", () => {
     } as unknown as ViewerAnalyticsResponse);
     expect(unsafe.size).toBe(0);
   });
+});
+
+describe("federated analytics labels", () => {
+  it("keeps same-name credentials and keys separate without changing filter identities", () => {
+    const accounts = ["111111111111", "222222222222"].map((suffix, index) => ({
+      id: `view_${suffix}`,
+      account_id: `view_${suffix}`,
+      auth_file_id: `view_${suffix}`,
+      account_display: "reader@example.com",
+      auth_file_display: "same.json",
+      instance_id: `instance-${index}`,
+      instance_name: `CPA ${index + 1}`,
+      calls: index + 1,
+    }));
+    const data = {
+      credential_stats: accounts,
+      api_key_stats: accounts.map((account) => ({
+        ...account,
+        api_key_id: account.id,
+        api_key_alias: "Shared",
+      })),
+    };
+    const normalized = adaptViewerAnalyticsResponse(data);
+    expect(normalized?.credential_stats).toMatchObject([
+      { label: "reader@example.com · CPA 1" },
+      { label: "reader@example.com · CPA 2" },
+    ]);
+    expect(
+      normalized?.credential_stats?.map((row) => row.auth_file_snapshot),
+    ).toEqual(accounts.map((row) => row.id));
+    const map = buildViewerApiKeyDisplayMap([], data);
+    expect([...map.values()].map((row) => row.label)).toEqual([
+      "Shared · CPA 1",
+      "Shared · CPA 2",
+    ]);
+    expect([...map.values()].map((row) => row.masked)).toEqual([
+      "Key 111111 · CPA 1",
+      "Key 222222 · CPA 2",
+    ]);
+    const adapted = adaptUsageAnalyticsData(normalized, "hour", "", map);
+    expect(adapted.credentialRows).toHaveLength(2);
+    expect(adapted.apiKeyRows).toHaveLength(2);
+  });
+});
+
+it("preserves explicit unknown percentiles and cache ratios in aggregated responses", () => {
+  const normalized = adaptViewerAnalyticsResponse({
+    summary: {
+      total_calls: 20,
+      cache_hit_rate: null,
+      p95_latency_ms: null,
+      average_latency_ms: null,
+      input_tokens: 100,
+      cached_tokens: 90,
+    },
+  });
+  const adapted = adaptUsageAnalyticsData(normalized, "hour", "", new Map());
+  expect(adapted.summary.p95LatencyMs).toBeNull();
+  expect(adapted.summary.averageLatencyMs).toBeNull();
+  expect(adapted.summary.cacheHitRate).toBeNull();
+  expect(Number.isNaN(computeCacheHitRate(adapted.summary))).toBe(true);
 });

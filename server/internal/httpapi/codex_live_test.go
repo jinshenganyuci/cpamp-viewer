@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +20,26 @@ import (
 var codexLiveTestTime = time.Date(2030, 9, 10, 12, 0, 0, 0, time.UTC)
 
 const codexLiveOriginalUserAgent = "codex-tui/0.149.1 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.149.1)"
+
+// Usage-specific fixtures count usage reads; reset-credit behavior and the
+// combined request budget are exercised separately in reset_credits_test.go.
+func codexLiveUsageTestServer(handler http.Handler) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/management/api-call" {
+			raw, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			var request struct {
+				URL string `json:"url"`
+			}
+			_ = json.Unmarshal(raw, &request)
+			if request.URL == codexResetCreditsURL {
+				codexLiveTestReply(w, http.StatusOK, `{"available_count":0,"credits":[]}`)
+				return
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+}
 
 func codexLiveTestFile(index, account string) map[string]any {
 	file := map[string]any{
@@ -75,7 +97,7 @@ func codexLiveAssertRemaining(t *testing.T, result codexUsageResult, remaining f
 
 func TestCodexLiveUsesOnlyFixedReadRequestAndTrustedCredentialIdentity(t *testing.T) {
 	var calls atomic.Int64
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.Method != http.MethodPost || r.URL.Path != "/v0/management/api-call" || r.URL.RawQuery != "" {
 			t.Errorf("unexpected wrapper request: %s %s", r.Method, r.URL.String())
@@ -150,7 +172,7 @@ func TestCodexLiveUsesOnlyFixedReadRequestAndTrustedCredentialIdentity(t *testin
 
 func TestCodexLiveOmitsMissingAccountHeaderAndSkipsDisabledOrMissingIndex(t *testing.T) {
 	var calls atomic.Int64
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		var body struct {
 			AuthIndex string            `json:"auth_index"`
@@ -194,7 +216,7 @@ func TestCodexLiveTreatsOuterSuccessWithInnerFailureAsFailure(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var calls atomic.Int64
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
 				codexLiveTestReply(w, test.status, test.body)
 			}))
@@ -224,7 +246,7 @@ func TestCodexLiveTTLFailureCooldownStaleDataAndRecovery(t *testing.T) {
 	var fail atomic.Bool
 	var used atomic.Int64
 	used.Store(43)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		if fail.Load() {
 			codexLiveTestReply(w, http.StatusForbidden, `{"error":"PRIVATE_UPSTREAM_ERROR"}`)
@@ -268,7 +290,7 @@ func TestCodexLiveTTLFailureCooldownStaleDataAndRecovery(t *testing.T) {
 func TestCodexLiveSuccessfulEmptyInventoryClearsOldWindows(t *testing.T) {
 	var empty atomic.Bool
 	var elapsed atomic.Int64
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if empty.Load() {
 			codexLiveTestReply(w, http.StatusOK, `{"plan_type":"pro","rate_limit":{"primary_window":null,"secondary_window":null},"additional_rate_limits":[]}`)
 			return
@@ -291,7 +313,7 @@ func TestCodexLiveSuccessfulEmptyInventoryClearsOldWindows(t *testing.T) {
 func TestCodexLiveCredentialAccountSwitchCannotReuseAnotherAccountCache(t *testing.T) {
 	var calls atomic.Int64
 	var elapsed atomic.Int64
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		var request struct {
 			Header map[string]string `json:"header"`
@@ -334,7 +356,7 @@ func TestCodexLiveCredentialAccountSwitchCannotReuseAnotherAccountCache(t *testi
 
 func TestCodexLiveDisabledAndRemovedAccountsDoNotExposeFreshCachedResults(t *testing.T) {
 	var calls atomic.Int64
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		codexLiveTestReply(w, http.StatusOK, codexLiveTestBody(43))
 	}))
@@ -370,7 +392,7 @@ func TestCodexLiveViewerRejectsProxyInputsBeforeAnyUpstreamCall(t *testing.T) {
 			"x-codex-primary-used-percent": "1", "x-codex-primary-window-minutes": "300",
 		},
 	}
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.Header.Get("Authorization") != "Bearer PRIVATE_CPAMP_ADMIN_KEY" || r.Header.Get("X-HTTP-Method-Override") != "" || r.Header.Get("X-Target-URL") != "" {
 			t.Error("visitor headers escaped to CPAMP")
@@ -459,7 +481,7 @@ func TestCodexLiveConcurrentVisitorsShareRefreshWithFourProviderCallsMaximum(t *
 	entered := make(chan struct{}, 128)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		current := active.Add(1)
 		defer active.Add(-1)
@@ -518,7 +540,7 @@ func TestCodexLiveCancelledAndDeadlineWaitersDoNotCancelSharedRefresh(t *testing
 	providerCancelled := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := codexLiveUsageTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		select {
 		case entered <- struct{}{}:

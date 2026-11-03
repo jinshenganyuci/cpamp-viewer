@@ -42,13 +42,16 @@ export function useViewerRefresh(
 
 export function useViewerAliases() {
   const [aliases, setAliases] = useState<ViewerAlias[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     try {
       const response = await api.aliases();
       setAliases(Array.isArray(response.items) ? response.items : []);
+      setWarnings(response.warnings ?? []);
     } catch {
       setAliases([]);
+      setWarnings(["API Key 名称暂不可用"]);
     }
   }, []);
 
@@ -57,12 +60,15 @@ export function useViewerAliases() {
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
-  return { aliases, refresh };
+  return { aliases, warnings, refresh };
 }
 
 export function useViewerModelPrices() {
   const [prices, setPrices] = useState<
     NonNullable<ViewerModelPricesResponse["prices"]>
+  >({});
+  const [instancePrices, setInstancePrices] = useState<
+    Record<string, NonNullable<ViewerModelPricesResponse["prices"]>>
   >({});
   const [error, setError] = useState("");
 
@@ -71,8 +77,20 @@ export function useViewerModelPrices() {
     try {
       const response = await api.modelPrices();
       setPrices(response.prices ?? {});
+      setInstancePrices(
+        Object.fromEntries(
+          (response.instances ?? [])
+            .filter(
+              (instance) =>
+                instance.instance_id && instance.available !== false,
+            )
+            .map((instance) => [instance.instance_id!, instance.prices ?? {}]),
+        ),
+      );
+      setError((response.warnings ?? []).join("；"));
     } catch (reason) {
       setPrices({});
+      setInstancePrices({});
       setError(reason instanceof Error ? reason.message : String(reason));
     }
   }, []);
@@ -82,7 +100,7 @@ export function useViewerModelPrices() {
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
-  return { prices, error, refresh };
+  return { prices, instancePrices, error, refresh };
 }
 
 export function useViewerAnalytics(
@@ -98,7 +116,9 @@ export function useViewerAnalytics(
   const autoRefreshMs = options.autoRefreshMs;
   const registerGlobalRefresh = options.registerGlobalRefresh !== false;
   const [data, setData] = useState<ViewerAnalyticsResponse | null>(null);
-  const [responseRequestKey, setResponseRequestKey] = useState<string | null>(null);
+  const [responseRequestKey, setResponseRequestKey] = useState<string | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
@@ -173,7 +193,8 @@ export function useViewerAnalytics(
     data,
     // Statistics can retain their last snapshot, but a coverage notice must
     // describe the currently selected request scope.
-    coverage: enabled && responseRequestKey === requestKey ? data?.coverage : undefined,
+    coverage:
+      enabled && responseRequestKey === requestKey ? data?.coverage : undefined,
     loading: enabled ? loading : false,
     error,
     lastRefreshedAt,

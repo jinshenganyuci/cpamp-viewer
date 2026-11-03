@@ -37,7 +37,16 @@ export interface QuotaWindow {
   model_scope?: string;
 }
 
+export type QuotaResetCredits = {
+  available_count: number | null;
+  credits: Array<{ expires_at_ms: number }>;
+  observed_at_ms?: number;
+  stale?: boolean;
+  partial?: boolean;
+};
+
 export interface QuotaAccount {
+  reset_credits?: QuotaResetCredits;
   id: string;
   source?: "cpamp" | "sub2api";
   provider: string;
@@ -62,6 +71,8 @@ export interface QuotaResponse {
 export interface KeyQuotaItem {
   id: string;
   name: string;
+  instance_id?: string;
+  instance_name?: string;
   state: "active" | "unlimited" | "inactive" | "unavailable";
   weekly_limit_usd?: number;
   remaining_usd?: number;
@@ -74,6 +85,8 @@ export interface KeyQuotaResponse {
   configured: boolean;
   updated_at?: string;
   stale: boolean;
+  partial_failed?: boolean;
+  warnings?: string[];
   items: KeyQuotaItem[];
 }
 

@@ -191,7 +191,7 @@ func projectUsageStatus(raw map[string]any) (publicUsageStatus, bool) {
 	}
 	return status, true
 }
-func (s *Server) handleUsageStatus(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSingleUsageStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")

@@ -1334,7 +1334,7 @@ export function RealtimeEventsPanel({
                       tooltipId={`${tooltipIdPrefix}-token-usage-tooltip-${row.id}`}
                     />
                   </td>
-                  <td>{hasPrices ? formatUsd(row.totalCost, 3) : '--'}</td>
+                  <td>{(row.costKnown ?? hasPrices) ? formatUsd(row.totalCost, 3) : '--'}</td>
                 </tr>
               );
             })}

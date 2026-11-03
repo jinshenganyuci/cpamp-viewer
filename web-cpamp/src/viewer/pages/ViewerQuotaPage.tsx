@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
@@ -14,6 +14,8 @@ import { useViewerQuota } from "@/viewer/hooks/useViewerData";
 import { formatDateTime } from "@/viewer/model/analytics";
 import {
   formatViewerCodexWindowLabel,
+  formatViewerResetCreditRemaining,
+  viewerResetCreditCount,
   formatViewerQuotaPercent,
   formatViewerQuotaWindowLabel,
   groupViewerCodexWindows,
@@ -203,6 +205,75 @@ function QuotaWindowRow({
   );
 }
 
+function ResetCredits({ account }: { account: ViewerQuotaAccount }) {
+  const credits = account.reset_credits;
+  const count = viewerResetCreditCount(credits?.available_count);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = globalThis.setInterval(() => setNow(Date.now()), 60_000);
+    return () => globalThis.clearInterval(timer);
+  }, []);
+  const expired = (credits?.credits ?? []).filter(
+    (credit) => credit.expires_at_ms <= now,
+  ).length;
+  const currentCount = count === null ? null : Math.max(0, count - expired);
+  const items = (credits?.credits ?? [])
+    .filter(
+      (credit) =>
+        viewerQuotaObservedTime(credit.expires_at_ms) &&
+        credit.expires_at_ms > now,
+    )
+    .sort((left, right) => left.expires_at_ms - right.expires_at_ms);
+  return (
+    <section className={viewerStyles.resetCredits} aria-label="重置卡">
+      <div className={viewerStyles.resetCreditHeading}>
+        <h3 className={viewerStyles.poolTitle}>重置卡</h3>
+        <strong>
+          {currentCount === null ? "数量未知" : `剩余 ${currentCount} 次`}
+        </strong>
+      </div>
+      {items.map((credit, index) => (
+        <div
+          key={`${credit.expires_at_ms}:${index}`}
+          className={viewerStyles.resetCreditRow}
+        >
+          <span>第 {index + 1} 次</span>
+          <strong>
+            {formatViewerResetCreditRemaining(credit.expires_at_ms, now)}
+          </strong>
+          <time
+            dateTime={new Date(credit.expires_at_ms).toISOString()}
+            title={formatDateTime(credit.expires_at_ms)}
+          >
+            {new Date(credit.expires_at_ms).toLocaleDateString("zh-CN", {
+              month: "2-digit",
+              day: "2-digit",
+            })}{" "}
+            到期
+          </time>
+        </div>
+      ))}
+      {currentCount === 0 ? (
+        <div className={viewerStyles.observation}>暂无可用重置卡</div>
+      ) : null}
+      {currentCount === null && items.length === 0 ? (
+        <div className={viewerStyles.observation}>暂无重置卡记录</div>
+      ) : null}
+      {credits?.partial && currentCount !== 0 ? (
+        <div className={viewerStyles.observation}>部分到期信息暂不可用</div>
+      ) : null}
+      {credits?.stale ? (
+        <div className={viewerStyles.stale}>重置卡为上次记录，等待更新</div>
+      ) : null}
+      {credits?.observed_at_ms ? (
+        <div className={viewerStyles.observation}>
+          观测 {formatDateTime(credits.observed_at_ms)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function ViewerQuotaCard({
   account,
   showFull,
@@ -274,6 +345,10 @@ function ViewerQuotaCard({
             ))}
         {!windows.length ? (
           <div className={styles.quotaMessage}>暂无已记录的额度快照</div>
+        ) : null}
+        {provider === "codex" &&
+        (account.source !== "sub2api" || account.reset_credits) ? (
+          <ResetCredits account={account} />
         ) : null}
         {account.status_message ? (
           <div className={styles.quotaWarning}>{account.status_message}</div>

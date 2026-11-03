@@ -35,6 +35,9 @@ interface UsageStatusCopy {
   idle: string;
   pendingTask: string;
   state: string;
+  instances: string;
+  partial: string;
+  instanceActivity: string;
   operations: Record<UsageStatusOperation, string>;
   states: Record<string, string>;
 }
@@ -76,6 +79,9 @@ const copies: Record<Language, UsageStatusCopy> = {
     idle: "当前没有维护任务",
     pendingTask: "有尚未完成的维护任务",
     state: "任务状态",
+    instances: "各实例状态",
+    partial: "部分实例暂不可用，汇总数据不完整。",
+    instanceActivity: "维护任务请查看各实例状态",
     operations: {
       archive: "正在归档",
       verify: "正在校验",
@@ -134,6 +140,9 @@ const copies: Record<Language, UsageStatusCopy> = {
     idle: "目前沒有維護工作",
     pendingTask: "有尚未完成的維護工作",
     state: "工作狀態",
+    instances: "各實例狀態",
+    partial: "部分實例暫時無法使用，彙總資料不完整。",
+    instanceActivity: "維護工作請查看各實例狀態",
     operations: {
       archive: "正在封存",
       verify: "正在驗證",
@@ -194,6 +203,9 @@ const copies: Record<Language, UsageStatusCopy> = {
     idle: "No active maintenance task",
     pendingTask: "An unfinished maintenance task remains",
     state: "Task status",
+    instances: "Instance status",
+    partial: "Some instances are unavailable. Combined data is incomplete.",
+    instanceActivity: "See each instance for maintenance activity",
     operations: {
       archive: "Archiving",
       verify: "Verifying",
@@ -253,6 +265,9 @@ const copies: Record<Language, UsageStatusCopy> = {
     idle: "Нет активных задач обслуживания",
     pendingTask: "Есть незавершённая задача обслуживания",
     state: "Состояние задачи",
+    instances: "Состояние экземпляров",
+    partial: "Некоторые экземпляры недоступны. Сводные данные неполны.",
+    instanceActivity: "Задачи обслуживания показаны для каждого экземпляра",
     operations: {
       archive: "Архивация",
       verify: "Проверка",
@@ -281,13 +296,19 @@ export function usageStatusCopy(language: string): UsageStatusCopy {
   return copies[language as Language] ?? copies.en;
 }
 
-export function formatUsageCount(value: number | undefined, language: string) {
+export function formatUsageCount(
+  value: number | null | undefined,
+  language: string,
+) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value.toLocaleString(language)
     : usageStatusCopy(language).unknown;
 }
 
-export function formatUsageBytes(value: number | undefined, language: string) {
+export function formatUsageBytes(
+  value: number | null | undefined,
+  language: string,
+) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     return usageStatusCopy(language).unknown;
   }
@@ -299,7 +320,10 @@ export function formatUsageBytes(value: number | undefined, language: string) {
   return `${(value / 1024 ** index).toLocaleString(language, { maximumFractionDigits: index ? 2 : 0 })} ${units[index]}`;
 }
 
-export function usageStatusTime(value: number | undefined, language: string) {
+export function usageStatusTime(
+  value: number | null | undefined,
+  language: string,
+) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
     return null;
   const date = new Date(value);

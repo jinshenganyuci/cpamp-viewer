@@ -19,6 +19,8 @@ const { mocks } = vi.hoisted(() => ({
   mocks: {
     dashboardRefresh: vi.fn<() => Promise<void>>(),
     headerRefresh: null as (() => Promise<void>) | null,
+    warnings: [] as string[],
+    instanceName: "东站",
   },
 }));
 
@@ -38,6 +40,7 @@ vi.mock("@/hooks/useHeaderRefresh", () => ({
 vi.mock("@/viewer/hooks/useViewerData", () => ({
   useViewerDashboard: () => ({
     data: {
+      warnings: mocks.warnings,
       generated_at_ms: Date.UTC(2026, 6, 14, 8, 0, 0),
       connection: { connected: true },
       system: { management_version: "2.0.0", server_version: "v1" },
@@ -67,6 +70,8 @@ vi.mock("@/viewer/hooks/useViewerData", () => ({
         {
           id: "view_channel_1",
           account_display: "安全账号",
+          instance_id: "instance_channel_hidden",
+          instance_name: mocks.instanceName,
           account_snapshot: "raw-channel-secret",
           calls: 10,
           failures: 1,
@@ -80,6 +85,8 @@ vi.mock("@/viewer/hooks/useViewerData", () => ({
           model: "gpt-safe",
           api_key_id: "view_key_1",
           api_key_alias: "马哥",
+          instance_id: "instance_failure_hidden",
+          instance_name: "西站",
           account_display: "安全失败账号",
           account_snapshot: "raw-failure-secret",
           header_trace_id: "raw-trace-secret",
@@ -106,6 +113,8 @@ describe("ViewerDashboardPage refresh", () => {
   beforeEach(() => {
     mocks.dashboardRefresh.mockReset();
     mocks.headerRefresh = null;
+    mocks.warnings = [];
+    mocks.instanceName = "东站";
   });
 
   it("keeps both page and header refresh pending until Viewer data is done", async () => {
@@ -174,12 +183,37 @@ describe("ViewerDashboardPage refresh", () => {
     expect(output).toContain("dashboard.view_full_config");
     expect(output).toContain("安全账号");
     expect(output).toContain("马哥");
+    const health = renderer.root.findByType(HealthAlertsSurface);
+    expect(health.props.channelRows[0].label).toBe("东站 · 安全账号");
+    expect(health.props.channelRows[0].title).toBe("东站 · 安全账号");
+    expect(health.props.failureRows[0].source).toBe("西站 · 马哥");
+    expect(health.props.failureRows[0].sourceTitle).toBe("西站 · 马哥");
+    expect(output).not.toContain("instance_channel_hidden");
+    expect(output).not.toContain("instance_failure_hidden");
     expect(output).not.toContain("raw-channel-secret");
     expect(output).not.toContain("raw-failure-secret");
     expect(output).not.toContain("raw-trace-secret");
     expect(output).not.toContain("dashboard.view_details");
     expect(output).not.toContain("dashboard.viewer_open_monitoring");
 
+    act(() => renderer.unmount());
+  });
+
+  it("displays partial source failures while preserving available dashboard cards", () => {
+    mocks.warnings = ["西站：统计暂不可用", "西站：统计暂不可用", "备用站 authorization: Bearer test-secret-value"];
+    mocks.instanceName = "东站 authorization: Bearer instance-secret-value";
+    let renderer!: ReactTestRenderer;
+    act(() => {
+      renderer = create(<MemoryRouter><ViewerDashboardPage /></MemoryRouter>);
+    });
+    const output = JSON.stringify(renderer.toJSON());
+    expect(output.match(/西站：统计暂不可用/g)).toHaveLength(1);
+    expect(output).not.toContain("test-secret-value");
+    expect(output).not.toContain("instance-secret-value");
+    expect(renderer.root.findByType(HealthAlertsSurface).props.channelRows[0].title).toContain("[redacted]");
+    expect(renderer.root.findAllByProps({ role: "status" })).toHaveLength(2);
+    expect(renderer.root.findAllByType(VersionCardSurface)).toHaveLength(1);
+    expect(renderer.root.findAllByType(HealthAlertsSurface)).toHaveLength(1);
     act(() => renderer.unmount());
   });
 });

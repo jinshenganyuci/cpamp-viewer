@@ -27,21 +27,25 @@ export function ViewerUsageStatusPage() {
   const { data, loading, refresh } = useViewerUsageStatus();
   useHeaderRefresh(refresh);
   const status = data?.available ? data.status : undefined;
-  const metrics: Array<[string, number | undefined]> = [
+  const metrics: Array<[string, number | null | undefined]> = [
     [copy.online, status?.raw_event_count],
     [copy.archived, status?.raw_archived_event_count],
     [copy.deleted, status?.raw_deleted_event_count],
   ];
   const checked = usageStatusTime(data?.checked_at_ms, language);
-  const dateValue = (value: number | undefined) => {
+  const dateValue = (value: number | null | undefined) => {
     const time = usageStatusTime(value, language);
     return time ? <time dateTime={time.iso}>{time.label}</time> : copy.unknown;
   };
-  const readiness = (ready: boolean) => (
+  const readiness = (ready: boolean | null | undefined) => (
     <span
       className={`${styles.badge} ${ready ? styles.ready : styles.pending}`}
     >
-      {ready ? copy.ready : copy.pending}
+      {ready === true
+        ? copy.ready
+        : ready === false
+          ? copy.pending
+          : copy.unknown}
     </span>
   );
 
@@ -64,6 +68,16 @@ export function ViewerUsageStatusPage() {
         </Button>
       </header>
 
+      {data?.partial_failed ? (
+        <p role="status" className={styles.warning}>
+          {copy.partial}
+        </p>
+      ) : null}
+      {data?.warnings?.map((warning, index) => (
+        <p key={`${index}:${warning}`} role="status" className={styles.warning}>
+          {warning}
+        </p>
+      ))}
       {status && data?.stale ? (
         <p role="status" className={styles.warning}>
           {copy.stale}
@@ -136,16 +150,18 @@ export function ViewerUsageStatusPage() {
             <article className={styles.card}>
               <h2 className={styles.cardTitle}>{copy.activity}</h2>
               <p className={styles.activity}>
-                {status.active_operation
-                  ? Object.prototype.hasOwnProperty.call(
-                      copy.operations,
-                      status.active_operation,
-                    )
-                    ? copy.operations[status.active_operation]
-                    : copy.operations.maintenance
-                  : status.active_status
-                    ? copy.pendingTask
-                    : copy.idle}
+                {data?.instances?.length
+                  ? copy.instanceActivity
+                  : status.active_operation
+                    ? Object.prototype.hasOwnProperty.call(
+                        copy.operations,
+                        status.active_operation,
+                      )
+                      ? copy.operations[status.active_operation]
+                      : copy.operations.maintenance
+                    : status.active_status
+                      ? copy.pendingTask
+                      : copy.idle}
               </p>
               {status.active_status ? (
                 <dl className={styles.values}>
@@ -167,6 +183,101 @@ export function ViewerUsageStatusPage() {
           {loading && !data ? copy.loading : copy.unavailable}
         </p>
       )}
+
+      {data?.instances?.length ? (
+        <section aria-label={copy.instances} className={styles.instances}>
+          <h2 className={styles.cardTitle}>{copy.instances}</h2>
+          <div className={styles.grid}>
+            {data.instances.map((instance) => {
+              const local = instance.available ? instance.status : undefined;
+              const localChecked = usageStatusTime(
+                instance.checked_at_ms,
+                language,
+              );
+              return (
+                <article key={instance.instance_id} className={styles.card}>
+                  <h3 className={styles.cardTitle}>{instance.instance_name}</h3>
+                  {instance.stale ? (
+                    <p className={styles.warning}>{copy.stale}</p>
+                  ) : null}
+                  {local ? (
+                    <dl className={styles.values}>
+                      <ValueRow label={copy.online}>
+                        {formatUsageCount(local.raw_event_count, language)}
+                      </ValueRow>
+                      <ValueRow label={copy.archived}>
+                        {formatUsageCount(
+                          local.raw_archived_event_count,
+                          language,
+                        )}
+                      </ValueRow>
+                      <ValueRow label={copy.deleted}>
+                        {formatUsageCount(
+                          local.raw_deleted_event_count,
+                          language,
+                        )}
+                      </ValueRow>
+                      <ValueRow label={copy.total}>
+                        {formatUsageBytes(local.storage.total_bytes, language)}
+                      </ValueRow>
+                      <ValueRow label={copy.reclaimable}>
+                        {formatUsageBytes(
+                          local.storage.reclaimable_bytes,
+                          language,
+                        )}
+                      </ValueRow>
+                      <ValueRow label={copy.earliest}>
+                        {dateValue(local.raw_min_timestamp_ms)}
+                      </ValueRow>
+                      <ValueRow label={copy.latest}>
+                        {dateValue(local.raw_max_timestamp_ms)}
+                      </ValueRow>
+                      <ValueRow label={copy.migration}>
+                        {readiness(local.migration_ready)}
+                      </ValueRow>
+                      <ValueRow label={copy.aggregate}>
+                        {readiness(local.hourly_aggregate_ready)}
+                      </ValueRow>
+                      <ValueRow label={copy.activity}>
+                        {local.active_operation
+                          ? Object.prototype.hasOwnProperty.call(
+                              copy.operations,
+                              local.active_operation,
+                            )
+                            ? copy.operations[local.active_operation]
+                            : copy.operations.maintenance
+                          : local.active_status
+                            ? copy.pendingTask
+                            : copy.idle}
+                      </ValueRow>
+                      {local.active_status ? (
+                        <ValueRow label={copy.state}>
+                          {Object.prototype.hasOwnProperty.call(
+                            copy.states,
+                            local.active_status,
+                          )
+                            ? copy.states[local.active_status]
+                            : copy.unknown}
+                        </ValueRow>
+                      ) : null}
+                    </dl>
+                  ) : (
+                    <p className={styles.description}>{copy.unavailable}</p>
+                  )}
+                  {localChecked ? (
+                    <p className={styles.checked}>
+                      {copy.checked}{" "}
+                      <time dateTime={localChecked.iso}>
+                        {localChecked.label}
+                      </time>
+                    </p>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       {checked ? (
         <p className={styles.checked}>

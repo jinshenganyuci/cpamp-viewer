@@ -137,10 +137,10 @@ export type UsageSummaryMetrics = {
   cachedTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
-  cacheHitRate?: number;
+  cacheHitRate?: number | null;
   estimatedCost: number;
   averageCostPerCall: number;
-  successRate: number;
+  successRate: number | null;
   failureCount: number;
   averageLatencyMs: number | null;
   p95LatencyMs: number | null;
@@ -199,7 +199,7 @@ export type UsageRankRow = {
   cacheCreationTokens: number;
   cacheHitTokens?: number;
   cacheHitInputTokens?: number;
-  cacheHitRate?: number;
+  cacheHitRate?: number | null;
   estimatedCost: number;
   averageLatencyMs: number | null;
   lastSeenMs?: number;
@@ -848,13 +848,13 @@ export const buildUsageSummary = (
   cachedTokens: toNumber(summary?.cached_tokens),
   cacheReadTokens: toNumber(summary?.cache_read_tokens),
   cacheCreationTokens: toNumber(summary?.cache_creation_tokens),
-  cacheHitRate:
+  cacheHitRate: summary?.cache_hit_rate === null ? null :
     typeof summary?.cache_hit_rate === 'number' && Number.isFinite(summary.cache_hit_rate)
       ? Math.min(1, Math.max(0, summary.cache_hit_rate))
       : undefined,
   estimatedCost: toNumber(summary?.total_cost),
   averageCostPerCall: toNumber(summary?.average_cost_per_call),
-  successRate: toNumber(summary?.success_rate),
+  successRate: summary?.success_rate === null ? null : toNumber(summary?.success_rate),
   failureCount: toNumber(summary?.failure_calls),
   averageLatencyMs: toNullableNumber(summary?.average_latency_ms),
   p95LatencyMs: toNullableNumber(summary?.p95_latency_ms),
@@ -872,8 +872,9 @@ export const computeCacheHitRate = (tokens: {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   cachedTokens: number;
-  cacheHitRate?: number;
+  cacheHitRate?: number | null;
 }): number => {
+  if (tokens.cacheHitRate === null) return Number.NaN;
   if (typeof tokens.cacheHitRate === 'number' && Number.isFinite(tokens.cacheHitRate)) {
     return Math.min(1, Math.max(0, tokens.cacheHitRate));
   }

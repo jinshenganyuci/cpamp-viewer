@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { ViewerQuotaWindow } from "./viewerTypes";
 import {
   formatViewerQuotaPercent,
+  formatViewerResetCreditRemaining,
+  viewerResetCreditCount,
   formatViewerQuotaWindowLabel,
   normalizeViewerQuotaProvider,
   viewerQuotaRemainingPercent,
@@ -77,5 +79,30 @@ describe("Viewer quota evidence", () => {
         windowFixture({ id: "secret-or-private-id" }),
       ),
     ).toBe("额度窗口（时长未确认）");
+  });
+});
+
+describe("reset credit evidence", () => {
+  it("keeps zero distinct from missing and invalid counts", () => {
+    expect(viewerResetCreditCount(0)).toBe(0);
+    for (const value of [undefined, null, -1, 1.5, Infinity, "2"])
+      expect(viewerResetCreditCount(value)).toBeNull();
+  });
+
+  it("formats remaining days, hours, minutes and expiry", () => {
+    const now = Date.UTC(2030, 8, 10, 12);
+    expect(formatViewerResetCreditRemaining(now + 3 * 86_400_000, now)).toBe(
+      "剩余 3 天",
+    );
+    expect(formatViewerResetCreditRemaining(now + 27 * 86_400_000, now)).toBe(
+      "剩余 27 天",
+    );
+    expect(formatViewerResetCreditRemaining(now + 2 * 3_600_000, now)).toBe(
+      "剩余 2 小时",
+    );
+    expect(formatViewerResetCreditRemaining(now + 30_000, now)).toBe(
+      "剩余 1 分钟",
+    );
+    expect(formatViewerResetCreditRemaining(now, now)).toBe("已过期");
   });
 });

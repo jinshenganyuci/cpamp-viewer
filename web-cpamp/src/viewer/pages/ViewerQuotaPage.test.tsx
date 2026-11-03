@@ -484,6 +484,97 @@ describe("Viewer quota pool and duration display", () => {
     expect(markup).not.toContain("<img");
   });
 
+  it("shows reset credit counts and individual expiry without controls", async () => {
+    const now = Date.UTC(2030, 8, 10, 12);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      const text = await render([], {
+        source: "cpamp",
+        reset_credits: {
+          available_count: 2,
+          credits: [
+            { expires_at_ms: now + 27 * 86_400_000 },
+            { expires_at_ms: now + 3 * 86_400_000 },
+          ],
+          observed_at_ms: now,
+        },
+      });
+      expect(text).toContain("重置卡");
+      expect(text).toContain("剩余 2 次");
+      expect(text).toContain("剩余 3 天");
+      expect(text).toContain("剩余 27 天");
+      expect(
+        renderer!.root.findByType("article").findAllByType("button"),
+      ).toHaveLength(0);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("distinguishes missing reset cards from a confirmed zero", async () => {
+    const unknown = await render([], { source: "cpamp" });
+    expect(unknown).toContain("数量未知");
+    expect(unknown).not.toContain("剩余 0 次");
+    await act(async () => renderer?.unmount());
+    const empty = await render([], {
+      source: "cpamp",
+      reset_credits: { available_count: 0, credits: [] },
+    });
+    expect(empty).toContain("剩余 0 次");
+    expect(empty).toContain("暂无可用重置卡");
+  });
+
+  it("does not present expired cards as usable and labels partial historical data", async () => {
+    const now = Date.UTC(2030, 8, 10, 12);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      const text = await render([], {
+        source: "cpamp",
+        reset_credits: {
+          available_count: 2,
+          credits: [
+            { expires_at_ms: now - 1 },
+            { expires_at_ms: now + 3 * 86_400_000 },
+          ],
+          partial: true,
+          stale: true,
+        },
+      });
+      expect(text).toContain("剩余 1 次");
+      expect(text).not.toContain("剩余 2 次");
+      expect(text).toContain("部分到期信息暂不可用");
+      expect(text).toContain("重置卡为上次记录，等待更新");
+      expect(renderer!.root.findAllByType("time")).toHaveLength(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("updates reset expiry while the page stays open without fetching upstream", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2030, 8, 10, 12));
+    try {
+      await render([], {
+        source: "cpamp",
+        reset_credits: {
+          available_count: 1,
+          credits: [{ expires_at_ms: Date.now() + 30_000 }],
+        },
+      });
+      expect(JSON.stringify(renderer?.toJSON())).toContain("剩余 1 次");
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(JSON.stringify(renderer?.toJSON())).toContain("剩余 0 次");
+      expect(renderer!.root.findAllByType("time")).toHaveLength(0);
+      expect(mock.refresh).not.toHaveBeenCalled();
+      await act(async () => renderer?.unmount());
+      renderer = undefined;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("adds no account management controls or active provider calls", async () => {
     const text = await render([windowFixture({})]);
     const card = renderer!.root.findByType("article");

@@ -1,3 +1,4 @@
+import { maskEmailLike } from './model/base';
 import type { AuthFileItem } from '@/types';
 import type { SourceProviderEnabledState } from '@/types/sourceInfo';
 import { isDisabledAuthFile } from '@/utils/quota/validators';
@@ -276,13 +277,17 @@ export const resolveAccountDisplayText = (
         value !== primary &&
         !isRedundantAccountLabel(value, primary)
     ) || '';
+  const visiblePrimary = displayMode === 'masked' ? maskEmailLike(primary) : primary;
+  const visibleSecondary = displayMode === 'masked' ? maskEmailLike(secondary) : secondary;
   const titleParts = Array.from(
-    new Set([primary, fullAccount, maskedAccount, secondary].filter(hasReadableAccountValue))
+    new Set([visiblePrimary, maskedAccount, visibleSecondary]
+      .filter(hasReadableAccountValue)
+      .map((value) => displayMode === 'masked' ? maskEmailLike(value) : value))
   );
 
   return {
-    primary,
-    secondary,
+    primary: visiblePrimary,
+    secondary: visibleSecondary,
     fullAccount: fullAccount || primary,
     title: titleParts.join(' / ') || primary,
   };

@@ -652,8 +652,9 @@ describe('RealtimeEventsPanel', () => {
     const fullMarkup = renderPanel(row, { accountDisplayMode: 'full' });
 
     expect(maskedMarkup).toContain('>ver***@example.com</span>');
+    expect(maskedMarkup).not.toContain('very-long-user@example.com');
     expect(maskedMarkup).toContain(
-      'title="ver***@example.com · Provider: openai · very-long-user@example.com'
+      'title="ver***@example.com · Provider: openai'
     );
     expect(fullMarkup).toContain('>very-long-user@example.com</span>');
     expect(fullMarkup).toContain('title="very-long-user@example.com · Provider: openai');
@@ -811,4 +812,11 @@ describe('RealtimeEventsPanel', () => {
     expect(markup).toContain('Loaded 500 of 500 events');
     expect(markup).toContain('Load more');
   });
+});
+
+it('shows unknown federated cost even when the primary price table is available', () => {
+  const unknown = renderPanel(baseRow({ totalCost: 0, costKnown: false }), { hasPrices: true });
+  expect(unknown).not.toContain('$0.000');
+  const known = renderPanel(baseRow({ totalCost: 3.1264, costKnown: true }), { hasPrices: false });
+  expect(known).toContain('$3.126');
 });

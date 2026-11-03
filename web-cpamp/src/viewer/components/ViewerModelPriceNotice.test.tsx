@@ -83,6 +83,71 @@ describe("ViewerModelPriceNotice", () => {
     expect(markup).not.toContain(">model-200</li>");
   });
 
+  it("shows unknown combined pricing and failed instances instead of silently treating them as priced", () => {
+    mocks.data = {
+      ...snapshot(),
+      unpriced_count: null,
+      model_count: null,
+      unpriced_models: [],
+      partial_failed: true,
+      warnings: ["CPA 二号 模型价格状态暂不可用"],
+      instances: [
+        {
+          instance_id: "one",
+          instance_name: "CPA 一号",
+          available: true,
+          stale: false,
+          unpriced_count: 0,
+          model_count: 12,
+          unpriced_models: [],
+        },
+        {
+          instance_id: "two",
+          instance_name: "CPA 二号",
+          available: false,
+          stale: false,
+          unpriced_count: 0,
+          model_count: 0,
+          unpriced_models: [],
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(<ViewerModelPriceNotice enabled />);
+    expect(markup).toContain("模型价格状态未完整获取，费用统计可能不完整");
+    expect(markup).toContain("部分实例暂不可用，汇总数据不完整");
+    expect(markup).toContain("CPA 二号 模型价格状态暂不可用");
+    expect(markup).toContain("各实例价格状态");
+    expect(markup).toContain("CPA 一号");
+    expect(markup).toContain("模型总数: 12");
+    expect(markup).not.toContain("模型总数: 0");
+    expect(markup).not.toContain("已读取的模型均已配置价格");
+  });
+
+  it("keeps an all-failed federation visible", () => {
+    mocks.data = {
+      ...snapshot(),
+      available: false,
+      unpriced_count: null,
+      model_count: null,
+      partial_failed: true,
+      instances: [
+        {
+          instance_id: "one",
+          instance_name: "暂离实例",
+          available: false,
+          stale: false,
+          unpriced_count: 0,
+          model_count: 0,
+          unpriced_models: [],
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(<ViewerModelPriceNotice enabled />);
+    expect(markup).toContain("暂离实例");
+    expect(markup).toContain("暂不可用");
+    expect(markup).not.toMatch(/<(?:a|button|input)\b/);
+  });
+
   it("escapes untrusted model names as text", () => {
     mocks.data = {
       ...snapshot(),

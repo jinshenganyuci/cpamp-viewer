@@ -122,6 +122,24 @@ describe("Key quota refresh lifecycle", () => {
     expect(latest.stale).toBe(false);
   });
 
+  it("accepts partial successes as fresh data and clears warnings after recovery", async () => {
+    const partial: KeyQuotaResponse = {
+      ...snapshot,
+      partial_failed: true,
+      warnings: ["西站：额度暂不可用"],
+      items: [{ ...snapshot.items[0], instance_id: "view_east", instance_name: "东站" }],
+    };
+    keyQuotas.mockResolvedValueOnce(partial);
+    await mount();
+    expect(latest.data).toBe(partial);
+    expect(latest.failed).toBe(false);
+    expect(latest.stale).toBe(false);
+    await act(async () => { await latest.refresh(); });
+    expect(latest.data).toBe(snapshot);
+    expect(latest.data?.partial_failed).not.toBe(true);
+    expect(latest.data?.warnings).toBeUndefined();
+  });
+
   it("ignores an aborted hidden-tab request after a newer request completes", async () => {
     let resolveOld!: (value: KeyQuotaResponse) => void;
     keyQuotas.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));

@@ -66,7 +66,7 @@ var (
 )
 
 const (
-	viewerVersion             = "2.7.0"
+	viewerVersion             = "2.8.0"
 	maxPublicEventsPage       = 500
 	maxDrilldownPreviewEvents = 100
 	eventsCursorAAD           = "cpamp-viewer/events-cursor/v1"
@@ -129,20 +129,23 @@ type quotaWindow struct {
 }
 
 type quotaAccount struct {
-	ID            string        `json:"id"`
-	Source        string        `json:"source,omitempty"`
-	SourceID      string        `json:"source_id,omitempty"`
-	SourceName    string        `json:"source_name,omitempty"`
-	Provider      string        `json:"provider"`
-	DisplayName   string        `json:"display_name"`
-	Plan          string        `json:"plan,omitempty"`
-	Status        string        `json:"status"`
-	StatusMessage string        `json:"status_message,omitempty"`
-	Disabled      bool          `json:"disabled"`
-	Windows       []quotaWindow `json:"windows"`
-	UpdatedAtMS   int64         `json:"updated_at_ms,omitempty"`
-	Success       int64         `json:"success,omitempty"`
-	Failed        int64         `json:"failed,omitempty"`
+	InstanceID    string             `json:"instance_id,omitempty"`
+	InstanceName  string             `json:"instance_name,omitempty"`
+	ResetCredits  *quotaResetCredits `json:"reset_credits,omitempty"`
+	ID            string             `json:"id"`
+	Source        string             `json:"source,omitempty"`
+	SourceID      string             `json:"source_id,omitempty"`
+	SourceName    string             `json:"source_name,omitempty"`
+	Provider      string             `json:"provider"`
+	DisplayName   string             `json:"display_name"`
+	Plan          string             `json:"plan,omitempty"`
+	Status        string             `json:"status"`
+	StatusMessage string             `json:"status_message,omitempty"`
+	Disabled      bool               `json:"disabled"`
+	Windows       []quotaWindow      `json:"windows"`
+	UpdatedAtMS   int64              `json:"updated_at_ms,omitempty"`
+	Success       int64              `json:"success,omitempty"`
+	Failed        int64              `json:"failed,omitempty"`
 }
 
 type quotaResponse struct {
@@ -237,18 +240,18 @@ type dashboardWindow struct {
 }
 
 type dashboardTimelinePoint struct {
-	BucketMS         int64   `json:"bucket_ms"`
-	Label            string  `json:"label,omitempty"`
-	Calls            int64   `json:"calls"`
-	Tokens           int64   `json:"tokens"`
-	Success          int64   `json:"success"`
-	Failure          int64   `json:"failure"`
-	CallsShare       float64 `json:"calls_share,omitempty"`
-	TokensShare      float64 `json:"tokens_share,omitempty"`
-	FailureRate      float64 `json:"failure_rate,omitempty"`
-	Cost             float64 `json:"cost,omitempty"`
-	AverageLatencyMS float64 `json:"average_latency_ms,omitempty"`
-	SuccessRate      float64 `json:"success_rate,omitempty"`
+	BucketMS         int64    `json:"bucket_ms"`
+	Label            string   `json:"label,omitempty"`
+	Calls            int64    `json:"calls"`
+	Tokens           int64    `json:"tokens"`
+	Success          int64    `json:"success"`
+	Failure          int64    `json:"failure"`
+	CallsShare       float64  `json:"calls_share,omitempty"`
+	TokensShare      float64  `json:"tokens_share,omitempty"`
+	FailureRate      float64  `json:"failure_rate,omitempty"`
+	Cost             float64  `json:"cost,omitempty"`
+	AverageLatencyMS *float64 `json:"average_latency_ms,omitempty"`
+	SuccessRate      float64  `json:"success_rate,omitempty"`
 }
 
 type dashboardHealthPoint struct {
@@ -312,6 +315,8 @@ type dashboardChannelUpstream struct {
 }
 
 type dashboardChannel struct {
+	InstanceID       string  `json:"instance_id,omitempty"`
+	InstanceName     string  `json:"instance_name,omitempty"`
 	ID               string  `json:"id"`
 	AuthID           string  `json:"auth_id,omitempty"`
 	SourceID         string  `json:"source_id,omitempty"`
@@ -333,6 +338,9 @@ type dashboardChannel struct {
 }
 
 type dashboardFailure struct {
+	ID                     string   `json:"id,omitempty"`
+	InstanceID             string   `json:"instance_id,omitempty"`
+	InstanceName           string   `json:"instance_name,omitempty"`
 	TimestampMS            int64    `json:"timestamp_ms"`
 	Model                  string   `json:"model"`
 	APIKeyHash             string   `json:"api_key_hash,omitempty"`
@@ -445,19 +453,9 @@ type dashboardResponse struct {
 	Connection    struct {
 		Connected bool `json:"connected"`
 	} `json:"connection"`
-	System struct {
-		ManagementVersion string `json:"management_version,omitempty"`
-		ServerVersion     string `json:"server_version,omitempty"`
-		BuildTime         any    `json:"build_time,omitempty"`
-		CPABase           string `json:"cpa_base,omitempty"`
-	} `json:"system"`
-	Health struct {
-		UsageMonitor string `json:"usage_monitor"`
-		RequestLog   string `json:"request_log"`
-		DataSource   string `json:"data_source"`
-		ErrorLogs    any    `json:"error_logs"`
-	} `json:"health"`
-	Stats struct {
+	System dashboardPublicSystem `json:"system"`
+	Health dashboardPublicHealth `json:"health"`
+	Stats  struct {
 		ManagementKeys  int  `json:"management_keys"`
 		AuthFiles       int  `json:"auth_files"`
 		AvailableModels *int `json:"available_models,omitempty"`
@@ -471,24 +469,21 @@ type dashboardResponse struct {
 			Total  int `json:"total"`
 		} `json:"providers"`
 	} `json:"stats"`
-	Config struct {
-		Debug           bool   `json:"debug"`
-		LoggingToFile   bool   `json:"logging_to_file"`
-		RequestRetry    int64  `json:"request_retry"`
-		WSAuth          bool   `json:"ws_auth"`
-		RoutingStrategy string `json:"routing_strategy,omitempty"`
-		ProxyURL        string `json:"proxy_url,omitempty"`
-	} `json:"config"`
-	Collector                  dashboardCollectorStatus `json:"collector"`
-	Today                      dashboardMetrics         `json:"today"`
-	Rolling30m                 dashboardRolling         `json:"rolling_30m"`
-	TopModelsToday             []dashboardModel         `json:"top_models_today"`
-	TrafficTimeline            []dashboardTimelinePoint `json:"traffic_timeline"`
-	TodayRequestHealthTimeline dashboardHealthTimeline  `json:"today_request_health_timeline"`
-	TokenMix                   []dashboardTokenMix      `json:"token_mix"`
-	ModelCostRank              []dashboardModel         `json:"model_cost_rank"`
-	ChannelHealth              []dashboardChannel       `json:"channel_health"`
-	RecentFailures             []dashboardFailure       `json:"recent_failures"`
+	Config                     *dashboardPublicConfig       `json:"config"`
+	Instances                  []federatedDashboardInstance `json:"instances,omitempty"`
+	PartialFailed              bool                         `json:"partial_failed,omitempty"`
+	Warnings                   []string                     `json:"warnings,omitempty"`
+	ModelRankingsPartial       bool                         `json:"model_rankings_partial,omitempty"`
+	Collector                  dashboardCollectorStatus     `json:"collector"`
+	Today                      dashboardMetrics             `json:"today"`
+	Rolling30m                 dashboardRolling             `json:"rolling_30m"`
+	TopModelsToday             []dashboardModel             `json:"top_models_today"`
+	TrafficTimeline            []dashboardTimelinePoint     `json:"traffic_timeline"`
+	TodayRequestHealthTimeline dashboardHealthTimeline      `json:"today_request_health_timeline"`
+	TokenMix                   []dashboardTokenMix          `json:"token_mix"`
+	ModelCostRank              []dashboardModel             `json:"model_cost_rank"`
+	ChannelHealth              []dashboardChannel           `json:"channel_health"`
+	RecentFailures             []dashboardFailure           `json:"recent_failures"`
 }
 
 func New(cfg config.Config, webFS embed.FS, logger *slog.Logger) (*Server, error) {
@@ -700,14 +695,17 @@ func (s *Server) withSession(next func(http.ResponseWriter, *http.Request)) http
 	}
 }
 
-func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	now := time.Now()
+func (s *Server) handleSingleDashboard(w http.ResponseWriter, r *http.Request) {
+	now := federationDashboardRequestTime(r)
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	query := url.Values{
 		"today_start_ms":  {strconv.FormatInt(todayStart.UnixMilli(), 10)},
 		"now_ms":          {strconv.FormatInt(now.UnixMilli(), 10)},
 		"top_models":      {"8"},
 		"recent_failures": {"8"},
+	}
+	if _, federated := r.Context().Value(federationDashboardClock{}).(time.Time); federated {
+		query.Set("top_models", strconv.Itoa(federationDashboardModelLimit))
 	}
 	var upstream dashboardUpstream
 	if err := s.cpamp.GetJSON(r.Context(), "/v0/management/dashboard/summary", query, &upstream); err != nil {
@@ -814,6 +812,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	response.Stats.Providers.Claude = len(cpaConfig.ClaudeAPIKeys)
 	response.Stats.Providers.OpenAI = len(cpaConfig.OpenAICompatibility)
 	response.Stats.Providers.Total = response.Stats.Providers.Gemini + response.Stats.Providers.Codex + response.Stats.Providers.XAI + response.Stats.Providers.Meta + response.Stats.Providers.Claude + response.Stats.Providers.OpenAI
+	response.Config = &dashboardPublicConfig{}
 	response.Config.Debug = cpaConfig.Debug
 	response.Config.LoggingToFile = cpaConfig.LoggingToFile
 	response.Config.RequestRetry = cpaConfig.RequestRetry
@@ -830,7 +829,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (s *Server) handleAliases(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSingleAliases(w http.ResponseWriter, r *http.Request) {
 	aliases, err := s.loadActiveAliases(r.Context())
 	if err != nil {
 		s.writeUpstreamError(w, err)
@@ -849,7 +848,7 @@ func (s *Server) handleAliases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (s *Server) handleMaintenance(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSingleMaintenance(w http.ResponseWriter, r *http.Request) {
 	var upstream databaseMaintenanceEnvelope
 	query := url.Values{"scope": {"database-maintenance"}}
 	if err := s.cpamp.GetJSON(r.Context(), "/status", query, &upstream); err != nil {
@@ -871,7 +870,7 @@ func boundedMaintenanceCount(value int) int {
 	return value
 }
 
-func (s *Server) handleModelPrices(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSingleModelPrices(w http.ResponseWriter, r *http.Request) {
 	var upstream modelPriceEnvelope
 	if err := s.cpamp.GetJSON(r.Context(), "/v0/management/model-prices", nil, &upstream); err != nil {
 		s.writeUpstreamError(w, err)
@@ -966,6 +965,7 @@ func (s *Server) loadCPAMPQuota(ctx context.Context) ([]quotaAccount, error) {
 			}
 			if account.Provider == "codex" && s.codexUsage != nil {
 				result := usage[codexUsageKey(file)]
+				account.ResetCredits = result.ResetCredits
 				if result.Valid {
 					// The complete response replaces ALL passive windows, including
 					// an empty inventory. Never append old unknown/Spark mirrors.
@@ -995,7 +995,7 @@ func (s *Server) loadCPAMPQuota(ctx context.Context) ([]quotaAccount, error) {
 	return accounts, nil
 }
 
-func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSingleAnalytics(w http.ResponseWriter, r *http.Request) {
 	select {
 	case s.analyticsSem <- struct{}{}:
 		defer func() { <-s.analyticsSem }()
@@ -1493,6 +1493,8 @@ func sanitizeDashboardUpstream(upstream *dashboardUpstream, aliases apiKeyAliasE
 	}
 	for index := range upstream.RecentFailures {
 		failure := &upstream.RecentFailures[index]
+		// Instance attribution is assigned by the Viewer federation layer only.
+		failure.ID, failure.InstanceID, failure.InstanceName = "", "", ""
 		rawHash := strings.ToLower(strings.TrimSpace(failure.APIKeyHash))
 		if alias := aliasByHash[rawHash]; alias != "" {
 			failure.APIKeyAlias = alias

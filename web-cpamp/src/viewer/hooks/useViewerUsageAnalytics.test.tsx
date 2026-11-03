@@ -4,8 +4,9 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useViewerUsageAnalytics } from "./useViewerUsageAnalytics";
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.stubGlobal("window", {
   setTimeout: globalThis.setTimeout.bind(globalThis),
@@ -20,6 +21,7 @@ const { mocks } = vi.hoisted(() => ({
       payload: Record<string, unknown>;
       options: Record<string, unknown>;
     }>,
+    warnings: [] as string[],
     provideV112Data: false,
     coverage: undefined as Record<string, unknown> | undefined,
     previousScopeCoverage: undefined as Record<string, unknown> | undefined,
@@ -36,9 +38,7 @@ vi.mock("@/hooks/useHeaderRefresh", () => ({
 vi.mock("@/viewer/hooks/useViewerData", () => ({
   useViewerAliases: () => ({ aliases: [], refresh: mocks.aliasesRefresh }),
   useViewerAnalytics: (
-    request:
-      | Record<string, unknown>
-      | (() => Record<string, unknown>),
+    request: Record<string, unknown> | (() => Record<string, unknown>),
     options: Record<string, unknown> = {},
   ) => {
     const payload = typeof request === "function" ? request() : request;
@@ -90,6 +90,7 @@ vi.mock("@/viewer/hooks/useViewerData", () => ({
         };
       }
     }
+    if (mocks.warnings.length) data = { ...data, warnings: mocks.warnings };
     const snapshotCoverage = mocks.previousScopeCoverage ?? mocks.coverage;
     if (snapshotCoverage) data = { ...data, coverage: snapshotCoverage };
     return {
@@ -121,6 +122,7 @@ describe("useViewerUsageAnalytics refresh", () => {
     mocks.analyticsRefresh.mockReset();
     mocks.analyticsRequests = [];
     mocks.provideV112Data = false;
+    mocks.warnings = [];
     mocks.coverage = undefined;
     mocks.previousScopeCoverage = undefined;
     mocks.headerRefresh = null;
@@ -129,6 +131,21 @@ describe("useViewerUsageAnalytics refresh", () => {
   afterEach(() => {
     act(() => renderer?.unmount());
     renderer = null;
+  });
+
+  it("keeps successful source analytics visible while reporting source failure once", async () => {
+    mocks.provideV112Data = true;
+    mocks.warnings = ["CPA 二号用量暂不可用"];
+    await act(async () => {
+      renderer = create(
+        <MemoryRouter>
+          <Harness />
+        </MemoryRouter>,
+      );
+    });
+    expect(latestResult!.error).toBe("CPA 二号用量暂不可用");
+    expect(latestResult!.enabled).toBe(true);
+    expect(latestResult!.loading).toBe(false);
   });
 
   it("keeps page and header refresh pending until both Viewer requests finish", async () => {
@@ -192,12 +209,14 @@ describe("useViewerUsageAnalytics refresh", () => {
       min_deleted_timestamp_ms: 1,
       max_deleted_timestamp_ms: 2,
       comparison_raw_deleted_event_count: 3,
-      auxiliary_ranges: [{
-        scope: "drilldown_preview",
-        from_ms: 1,
-        to_ms: 2,
-        raw_deleted_event_count: 1,
-      }],
+      auxiliary_ranges: [
+        {
+          scope: "drilldown_preview",
+          from_ms: 1,
+          to_ms: 2,
+          raw_deleted_event_count: 1,
+        },
+      ],
       fidelity_limitations: ["event_details_require_raw_events"],
     };
 
@@ -250,9 +269,8 @@ describe("useViewerUsageAnalytics refresh", () => {
       await Promise.resolve();
     });
 
-    const apiKeyTimelineRequest = mocks.analyticsRequests.find(
-      ({ payload }) =>
-        Boolean((payload.include as Record<string, unknown>)?.api_key_timeline),
+    const apiKeyTimelineRequest = mocks.analyticsRequests.find(({ payload }) =>
+      Boolean((payload.include as Record<string, unknown>)?.api_key_timeline),
     );
     expect(apiKeyTimelineRequest?.options.enabled).toBe(true);
     expect(apiKeyTimelineRequest?.payload.filters).toMatchObject({

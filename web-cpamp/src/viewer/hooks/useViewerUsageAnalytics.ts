@@ -63,6 +63,8 @@ import {
   buildViewerUsageAnalyticsRequest,
 } from "@/viewer/model/viewerUsageAnalyticsAdapter";
 
+import { viewerSourceWarnings } from "@/viewer/model/instance";
+
 const USAGE_SEARCH_DEBOUNCE_MS = 350;
 const USAGE_HEATMAP_ALL_DATES_KEY = "all";
 const API_KEY_TREND_SERIES_LIMIT = 4;
@@ -119,7 +121,11 @@ const buildRequest = ({
 
 export function useViewerUsageAnalytics() {
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
-  const { aliases, refresh: refreshAliases } = useViewerAliases();
+  const {
+    aliases,
+    warnings: aliasWarnings,
+    refresh: refreshAliases,
+  } = useViewerAliases();
   const [searchParams, setSearchParams] = useSearchParams();
   const [initialUiState] = useState<UsageAnalyticsUiState>(() =>
     buildUsageAnalyticsUiStateFromSearchParams(
@@ -127,10 +133,13 @@ export function useViewerUsageAnalytics() {
       readUsageAnalyticsUiState(),
     ),
   );
-  const [filters, setFiltersState] = useState<UsageAnalyticsFiltersState>(() => ({
-    ...initialUiState.filters,
-    apiKeyHash: getSelectableApiKeyHash(initialUiState.filters.apiKeyHash) || "all",
-  }));
+  const [filters, setFiltersState] = useState<UsageAnalyticsFiltersState>(
+    () => ({
+      ...initialUiState.filters,
+      apiKeyHash:
+        getSelectableApiKeyHash(initialUiState.filters.apiKeyHash) || "all",
+    }),
+  );
   const [activeTabState, setActiveTabState] = useState<UsageAnalyticsTab>(
     () => initialUiState.activeTab,
   );
@@ -671,7 +680,7 @@ export function useViewerUsageAnalytics() {
   );
   const credentialTrendLoading = Boolean(
     selectedCredentialTimelineEnabled &&
-      selectedCredentialTimelineAnalytics.loading,
+    selectedCredentialTimelineAnalytics.loading,
   );
   const credentialTrendError = selectedCredentialTimelineEnabled
     ? selectedCredentialTimelineAnalytics.error
@@ -755,8 +764,7 @@ export function useViewerUsageAnalytics() {
           ...(patch.apiKeyHash === undefined
             ? {}
             : {
-                apiKeyHash:
-                  getSelectableApiKeyHash(patch.apiKeyHash) || "all",
+                apiKeyHash: getSelectableApiKeyHash(patch.apiKeyHash) || "all",
               }),
         };
         writeUsageAnalyticsUiState({ filters: next });
@@ -858,7 +866,21 @@ export function useViewerUsageAnalytics() {
     bounds,
     resolvedGranularity,
     loading: analytics.loading || refreshing,
-    error: analytics.error,
+    error: [
+      analytics.error,
+      filterSelectorsAnalytics.error,
+      ...(aliasWarnings ?? []),
+      ...viewerSourceWarnings(
+        analytics.data,
+        filterSelectorsAnalytics.data,
+        heatmapDateAnalytics.data,
+        apiKeyTrendAnalytics.data,
+        selectedApiKeyTimelineAnalytics.data,
+        selectedCredentialTimelineAnalytics.data,
+      ),
+    ]
+      .filter(Boolean)
+      .join("；"),
     enabled: true,
     apiKeyDisplayMap,
     authFileDisplayMap,

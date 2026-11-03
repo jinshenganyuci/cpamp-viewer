@@ -1,11 +1,18 @@
 import type { AnalyticsCoverage } from "@/viewer/api/types";
 
-export type ViewerAlias = {
+export type ViewerInstanceIdentity = {
+  instance_id?: string;
+  instance_name?: string;
+};
+
+export type ViewerAlias = ViewerInstanceIdentity & {
   id: string;
   alias: string;
 };
 
 export type ViewerAliasResponse = {
+  warnings?: string[];
+  partial_failed?: boolean;
   items?: ViewerAlias[];
 };
 
@@ -22,7 +29,7 @@ export type ViewerDashboardMetrics = {
   total_calls?: number;
   success_calls?: number;
   failure_calls?: number;
-  success_rate?: number;
+  success_rate?: number | null;
   input_tokens?: number;
   output_tokens?: number;
   cached_tokens?: number;
@@ -83,7 +90,7 @@ export type ViewerModelStat = {
   last_seen_ms?: number;
 };
 
-export type ViewerAccountStat = {
+export type ViewerAccountStat = ViewerInstanceIdentity & {
   id: string;
   account_id?: string;
   account_display?: string;
@@ -118,7 +125,7 @@ export type ViewerApiKeyStat = ViewerAccountStat & {
   api_key_selectable?: boolean;
 };
 
-export type ViewerFailure = {
+export type ViewerFailure = ViewerInstanceIdentity & {
   timestamp_ms: number;
   model?: string;
   api_key_id?: string;
@@ -216,7 +223,7 @@ export type ViewerAnomalyPoint = {
   failure_rate?: number;
 };
 
-export type ViewerChannelStat = {
+export type ViewerChannelStat = ViewerInstanceIdentity & {
   id?: string;
   channel?: string;
   source?: string;
@@ -243,18 +250,20 @@ export type ViewerChannelStat = {
 };
 
 export type ViewerAnalyticsResponse = {
+  warnings?: string[];
+  partial_failed?: boolean;
   coverage?: AnalyticsCoverage;
   generated_at_ms?: number;
   granularity?: string;
   summary?: ViewerDashboardMetrics & {
-    cache_hit_rate?: number;
+    cache_hit_rate?: number | null;
     average_cost_per_call?: number;
     p95_ttft_ms?: number | null;
-    avg_daily_requests?: number;
-    avg_daily_tokens?: number;
+    avg_daily_requests?: number | null;
+    avg_daily_tokens?: number | null;
     approx_tasks?: number;
     approx_task_failures?: number;
-    approx_task_success_rate?: number;
+    approx_task_success_rate?: number | null;
   };
   summary_comparison?: Partial<ViewerDashboardMetrics> & {
     from_ms?: number;
@@ -285,6 +294,7 @@ export type ViewerAnalyticsResponse = {
     next_cursor?: string;
     total_count?: number;
   };
+  filter_selectors?: ViewerAnalyticsResponse["filter_options"];
   filter_options?: {
     models?: string[];
     providers?: string[];
@@ -295,10 +305,21 @@ export type ViewerAnalyticsResponse = {
     api_key_count?: number;
     account_ids?: string[];
     auth_file_ids?: string[];
-    auth_file_options?: Array<{ id: string; display?: string; label?: string }>;
+    auth_file_options?: Array<
+      ViewerInstanceIdentity & { id: string; display?: string; label?: string }
+    >;
     project_ids?: string[];
-    project_options?: Array<{ id: string; display?: string; label?: string }>;
-    api_keys?: Array<string | { id: string; label?: string; alias?: string }>;
+    project_options?: Array<
+      ViewerInstanceIdentity & { id: string; display?: string; label?: string }
+    >;
+    api_keys?: Array<
+      | string
+      | (ViewerInstanceIdentity & {
+          id: string;
+          label?: string;
+          alias?: string;
+        })
+    >;
   };
 };
 
@@ -325,10 +346,21 @@ export type ViewerModelPrice = {
 };
 
 export type ViewerModelPricesResponse = {
+  warnings?: string[];
+  partial_failed?: boolean;
+  conflicting_models?: string[];
+  instances?: Array<
+    ViewerInstanceIdentity & {
+      available?: boolean;
+      prices?: Record<string, ViewerModelPrice>;
+    }
+  >;
   prices?: Record<string, ViewerModelPrice>;
 };
 
 export type ViewerDashboardResponse = {
+  warnings?: string[];
+  partial_failed?: boolean;
   generated_at_ms?: number;
   window?: {
     today_start_ms?: number;
@@ -395,7 +427,16 @@ export type ViewerQuotaWindow = {
   model_scope?: string;
 };
 
+export type ViewerQuotaResetCredits = {
+  available_count: number | null;
+  credits: Array<{ expires_at_ms: number }>;
+  observed_at_ms?: number;
+  stale?: boolean;
+  partial?: boolean;
+};
+
 export type ViewerQuotaAccount = {
+  reset_credits?: ViewerQuotaResetCredits;
   id: string;
   source?: "cpamp" | "sub2api";
   source_id?: string;

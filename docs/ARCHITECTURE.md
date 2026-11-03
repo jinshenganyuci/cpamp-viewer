@@ -1,6 +1,6 @@
 # 架构说明
 
-本文描述 Viewer 2.7.0 的源码结构、数据流和扩展边界。前端上游来源及选择性移植范围见 [UPSTREAM_BASELINE.md](UPSTREAM_BASELINE.md) 和 [web-cpamp/UPSTREAM.md](../web-cpamp/UPSTREAM.md)，协作和验证流程见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
+本文描述 Viewer 2.8.0 的源码结构、数据流和扩展边界。前端上游来源及选择性移植范围见 [UPSTREAM_BASELINE.md](UPSTREAM_BASELINE.md) 和 [web-cpamp/UPSTREAM.md](../web-cpamp/UPSTREAM.md)，协作和验证流程见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 ## 1. 运行组成
 
@@ -122,13 +122,19 @@ flowchart LR
 
 `GET /quota` 的 CPAMP 账户列表来自服务端读取的 auth-file 元数据，浏览器不能指定账户、凭据、上游地址或请求头。处理器同时组织完整 Codex 查询、非 Codex 已保存快照和请求头观测，最后生成统一的账户与窗口 DTO。配置 Sub2API 后，服务端并行读取两个来源并在同一响应中合并账号，逐账号保留 `source` 标识；单侧读取失败时返回另一侧数据和通用提示。
 
-### 多实例配额来源
+### 多实例只读聚合
 
-2.7.0 正式镜像包含多实例支持。`VIEWER_QUOTA_SOURCES` 或 `VIEWER_QUOTA_SOURCES_FILE` 提供额外的 CPA/Sub2API 来源列表，两项互斥，与主 CPA 和旧式单 Sub2API 配置一起加载。配置校验拒绝无效地址、重复端点、混用凭据、未知字段和超过 16 个来源的配置，错误信息不回显密钥。每个额外 CPA 拥有独立客户端和额度缓存，Sub2API 使用独立管理员凭据；汇总最多同时读取 4 个来源，单侧故障仅生成对应实例提示，全部故障才返回错误。成功的空账号列表也视为可用来源。
+2.8.0 正式镜像包含多实例支持。`VIEWER_QUOTA_SOURCES` 或 `VIEWER_QUOTA_SOURCES_FILE` 提供额外的 CPA/Sub2API 来源列表，两项互斥，与主 CPA 和旧式单 Sub2API 配置一起加载。配置校验拒绝无效地址、重复端点、混用凭据、未知字段和超过 16 个来源的配置，错误信息不回显密钥。每个额外 CPA 拥有独立客户端和额度缓存，Sub2API 使用独立管理员凭据；汇总最多同时读取 4 个来源，单侧故障仅生成对应实例提示，全部故障才返回错误。成功的空账号列表也视为可用来源。
 
 原有 `.env` 部署可通过 Compose `environment` 映射内联 JSON；文件方案由 `compose.quota-sources.yaml` 挂载，使用在线镜像无需源码构建。列表只增加新来源，不替换或重复主 CPAMP / 原 Sub2API。
 
-额外来源的账号 ID 以类型、地址生成的匿名来源标识隔离；名称、列表顺序和密钥变化不会改变账号身份。公开 DTO 只增加 `source_id` 和 `source_name`，不返回地址或凭据。主 CPA 和旧式 Sub2API 的账号 ID 保持兼容。配额页沿用现有布局并支持按实例名称搜索，其他 API 仍读取主 CPA。
+额外来源的账号 ID 以类型、地址生成的匿名来源标识隔离；名称、列表顺序和密钥变化不会改变账号身份。多 CPAMP 的公开 DTO 增加 `instance_id` 和 `instance_name`，不返回管理地址或凭据；既有 `source_id` 仍表示认证/请求来源，不能被实例 ID 覆盖。多 CPAMP 模式对主、副实例的账号、Key、认证文件和事件 ID 统一增加实例隔离。单 CPAMP 保持既有行为。
+
+`federation_*.go` 聚合仪表盘、监控分析、公开别名、Key 额度、用量状态和模型价格状态。固定接口和严格投影沿用单源边界。过滤条件由公开 ID 在服务端解析并仅转发匹配实例，冲突条件不能退化为全量请求。全局分页游标使用独立 AEAD 上下文，绑定来源、筛选和原时间范围；保存每源进度和未消耗页指纹，页发生变化返回 409 要求刷新。
+
+同名实体保留独立身份，模型和时间桶合计适用的计数。P95、缺少有效样本数的平均延迟、无法可靠合并的日均指标保留未知，不拼凑近似值。各源价格冲突时不返回单一通用价格。部分失败显式提示，健康数据保留；Sub2API 仅额度聚合，健康检查仍检查主 CPAMP。
+
+Codex 重置卡只经固定 GET 读取 `wham/rate-limit-reset-credits`，与 usage 查询独立降级。DTO 仅包含数量、到期时间、观测时间和状态，过滤已消费/过期条目，不暴露卡 ID；永不调用消费接口。
 
 ### Sub2API 被动额度
 

@@ -168,6 +168,74 @@ describe("readonly usage status page", () => {
     expect(JSON.stringify(renderer?.toJSON())).toContain("当前没有在线明细");
   });
 
+  it("keeps incomplete combined counts unknown and shows independent instance status", async () => {
+    const local = snapshot().status!;
+    mock.result.data = {
+      ...snapshot(),
+      partial_failed: true,
+      warnings: ["CPA 二号 用量状态暂不可用"],
+      status: {
+        raw_event_count: null,
+        raw_archived_event_count: null,
+        raw_deleted_event_count: null,
+        raw_min_timestamp_ms: null,
+        raw_max_timestamp_ms: null,
+        migration_ready: null,
+        hourly_aggregate_ready: null,
+        storage: {
+          database_bytes: null,
+          wal_bytes: null,
+          shm_bytes: null,
+          total_bytes: null,
+          reclaimable_bytes: null,
+        },
+      },
+      instances: [
+        {
+          instance_id: "one",
+          instance_name: "CPA 一号",
+          available: true,
+          stale: false,
+          status: local,
+        },
+        {
+          instance_id: "two",
+          instance_name: "CPA 二号",
+          available: false,
+          stale: false,
+        },
+      ],
+    };
+    const output = await render();
+    expect(output).toContain("部分实例暂不可用，汇总数据不完整");
+    expect(output).toContain("CPA 二号 用量状态暂不可用");
+    expect(output).toContain("各实例状态");
+    expect(output).toContain("CPA 一号");
+    expect(output).toContain("CPA 二号");
+    expect(output).toContain("1,200");
+    expect(output).toContain("正在归档");
+    expect(output).not.toContain("当前没有在线明细");
+    const metrics = renderer!.root.findAll(
+      (node) =>
+        node.type === "p" && node.props.className?.includes("metricValue"),
+    );
+    expect(metrics.map((node) => node.children.join(""))).toEqual([
+      "未知",
+      "未知",
+      "未知",
+    ]);
+    const failed = renderer!.root
+      .findAllByType("article")
+      .find((node) =>
+        node
+          .findAllByType("h3")
+          .some((heading) => heading.children.includes("CPA 二号")),
+      );
+    expect(failed).toBeDefined();
+    expect(failed?.findAllByType("dd")).toHaveLength(0);
+    expect(renderer!.root.findAllByType("button")).toHaveLength(1);
+  });
+
   it("does not render unexpected internal state text", async () => {
     mock.result.data!.status!.active_status = "/private/path Bearer secret";
     const output = await render();

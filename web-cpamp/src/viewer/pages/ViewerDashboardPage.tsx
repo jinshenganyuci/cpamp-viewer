@@ -40,6 +40,7 @@ import {
   normalizeViewerDashboard,
   type ViewerDashboardReadOnlyProjection,
 } from "./ViewerDashboardPage.model";
+import viewerStyles from "./ViewerDashboardPage.module.scss";
 
 const healthTone = (value?: string): VersionHealthTone => {
   const normalized = String(value || "").toLowerCase();
@@ -265,6 +266,9 @@ export function ViewerDashboardPage() {
   const { t, i18n } = useTranslation();
   const { data, loading, error, refresh } = useViewerDashboard();
   const dashboard = data as ViewerDashboardReadOnlyProjection | null;
+  const warnings = [
+    ...new Set((dashboard?.warnings || []).map(maskSensitiveText).filter(Boolean)),
+  ];
   const panelBase =
     typeof window !== "undefined" && window.location?.origin
       ? window.location.origin
@@ -339,19 +343,24 @@ export function ViewerDashboardPage() {
   const channelRows = useMemo<HealthAlertsChannelRow[]>(() => {
     const rows: ViewerChannelStat[] = dashboard?.channel_health || [];
     return rows.slice(0, 5).map((row, index) => {
-      const label =
+      const accountLabel =
         row.account_display ||
         row.auth_label_display ||
         row.source_display ||
         row.channel ||
         row.provider ||
         t("dashboard.viewer_channel_fallback", { index: index + 1 });
+      const label = [row.instance_name, accountLabel]
+        .filter(Boolean)
+        .map((value) => maskSensitiveText(value || ""))
+        .join(" · ");
       const failures = Number(row.failure ?? row.failures ?? 0);
       const calls = Number(row.calls || 0);
       const successRate = Number(
         row.success_rate ?? (calls > 0 ? (calls - failures) / calls : 0),
       );
       const title = [
+        row.instance_name,
         row.account_display,
         row.auth_label_display,
         row.source_display,
@@ -361,6 +370,7 @@ export function ViewerDashboardPage() {
           (value, position, values) =>
             Boolean(value) && values.indexOf(value) === position,
         )
+        .map((value) => maskSensitiveText(value || ""))
         .join(" · ");
       return {
         key: row.id || `${label}-${index}`,
@@ -374,13 +384,17 @@ export function ViewerDashboardPage() {
   const failureRows = useMemo<HealthAlertsFailureRow[]>(() => {
     const rows: ViewerFailure[] = dashboard?.recent_failures || [];
     return rows.slice(0, 3).map((row, index) => {
-      const caller =
+      const callerLabel =
         row.api_key_alias ||
         row.auth_label_display ||
         row.account_display ||
         row.source_display ||
         row.auth_provider_snapshot ||
         t("dashboard.viewer_unknown_caller");
+      const caller = [row.instance_name, callerLabel]
+        .filter(Boolean)
+        .map((value) => maskSensitiveText(value || ""))
+        .join(" · ");
       const statusText = row.fail_status_code
         ? `${t("monitoring.fail_status_code_short")} ${row.fail_status_code}`
         : "";
@@ -530,6 +544,12 @@ export function ViewerDashboardPage() {
           </div>
         </div>
       </header>
+
+      {warnings.map((warning) => (
+        <p key={warning} role="status" className={viewerStyles.warning}>
+          {warning}
+        </p>
+      ))}
 
       <section className={dashboardStyles.overviewRow}>
         <VersionCardSurface

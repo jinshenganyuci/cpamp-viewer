@@ -107,8 +107,8 @@ const formatFullNumber = (value: number, locale: string) =>
     Number.isFinite(value) ? value : 0
   );
 
-const formatPercent = (value: number) =>
-  `${((Number.isFinite(value) ? value : 0) * 100).toFixed(1)}%`;
+const formatPercent = (value: number | null) =>
+  value !== null && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '--';
 
 const formatDelta = (value: number) => {
   const sign = value > 0 ? '+' : '';
@@ -191,7 +191,7 @@ export const buildUsageOverviewSummaryCards = ({
       icon: 'success',
       label: t('usage_analytics.success_rate'),
       meta: `${p95LatencyLabel} ${formatUsageDurationMs(p95LatencyValue)}`,
-      tone: summary.successRate >= 0.95 ? 'good' : summary.successRate >= 0.85 ? 'warn' : 'bad',
+      tone: summary.successRate === null ? undefined : summary.successRate >= 0.95 ? 'good' : summary.successRate >= 0.85 ? 'warn' : 'bad',
       value: formatPercent(summary.successRate),
     },
     {

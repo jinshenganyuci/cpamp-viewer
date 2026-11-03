@@ -52,11 +52,23 @@
   background: var(--bg-primary);
 }
 
-.name {
+.cardHeading {
   margin: 0 0 28px;
+}
+
+.name {
+  margin: 0;
   font-size: 18px;
   font-weight: 600;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.instance {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 
@@ -127,6 +139,14 @@
   color: var(--warning-text);
   font-size: 13px;
   line-height: 1.6;
+
+  p {
+    margin: 0;
+  }
+
+  p + p {
+    margin-top: 4px;
+  }
 }
 
 .fill.warning {

@@ -173,7 +173,7 @@ func safeModelPriceStatusNames(raw json.RawMessage) ([]string, bool) {
 	return names, true
 }
 
-func (s *Server) handleModelPriceStatus(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSingleModelPriceStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")

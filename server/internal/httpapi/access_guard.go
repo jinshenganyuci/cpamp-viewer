@@ -17,6 +17,10 @@ import (
 
 const accessGuardCacheTTL = 15 * time.Second
 
+// The refresh itself owns a slot so canceled visitors cannot create more
+// upstream reads while an earlier shared refresh is still running.
+var accessGuardRefreshSlots = make(chan struct{}, 4)
+
 type accessGuardQuotaItem struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
@@ -26,13 +30,17 @@ type accessGuardQuotaItem struct {
 	RemainingPercent *float64 `json:"remaining_percent,omitempty"`
 	WindowStarted    *bool    `json:"window_started,omitempty"`
 	ResetAt          string   `json:"reset_at,omitempty"`
+	InstanceID       string   `json:"instance_id,omitempty"`
+	InstanceName     string   `json:"instance_name,omitempty"`
 }
 
 type accessGuardQuotaResponse struct {
-	Configured bool                   `json:"configured"`
-	UpdatedAt  string                 `json:"updated_at,omitempty"`
-	Stale      bool                   `json:"stale"`
-	Items      []accessGuardQuotaItem `json:"items"`
+	Configured    bool                   `json:"configured"`
+	UpdatedAt     string                 `json:"updated_at,omitempty"`
+	Stale         bool                   `json:"stale"`
+	Items         []accessGuardQuotaItem `json:"items"`
+	PartialFailed bool                   `json:"partial_failed"`
+	Warnings      []string               `json:"warnings,omitempty"`
 }
 
 type accessGuardQuotaCache struct {
@@ -55,8 +63,8 @@ func newAccessGuardQuotaCache(cfg config.Config) *accessGuardQuotaCache {
 		return nil
 	}
 	timeout := cfg.RequestTimeout
-	if timeout <= 0 {
-		timeout = 25 * time.Second
+	if timeout <= 0 || timeout > 10*time.Second {
+		timeout = 10 * time.Second
 	}
 	maxBytes := cfg.MaxUpstreamBodyBytes
 	if maxBytes <= 0 {
@@ -94,7 +102,9 @@ func (s *Server) handleAccessGuardQuotas(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	response, err := s.accessGuard.snapshot(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), 28*time.Second)
+	defer cancel()
+	response, err := federatedAccessGuardSnapshot(ctx, s.cpampReadSources())
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Access Guard is unavailable")
 		return
@@ -107,53 +117,72 @@ func (c *accessGuardQuotaCache) snapshot(ctx context.Context) (accessGuardQuotaR
 		return accessGuardQuotaResponse{Items: []accessGuardQuotaItem{}}, nil
 	}
 	for {
+		if ctx.Err() != nil {
+			return accessGuardQuotaResponse{}, accessguard.ErrUnavailable
+		}
 		c.mu.Lock()
 		if c.now().Before(c.nextAttempt) {
 			response, err := c.cachedLocked()
 			c.mu.Unlock()
 			return response, err
 		}
-		if pending := c.pending; pending != nil {
-			c.mu.Unlock()
-			select {
-			case <-ctx.Done():
-				return accessGuardQuotaResponse{}, accessguard.ErrUnavailable
-			case <-pending:
-				continue
-			}
+		if c.pending == nil {
+			c.pending = make(chan struct{})
+			// Detach the bounded refresh, not the visitor's wait. All visitors
+			// including the initiator can leave without canceling shared work.
+			refreshParent := context.WithoutCancel(ctx)
+			go c.refresh(refreshParent)
 		}
-		c.pending = make(chan struct{})
+		pending := c.pending
 		c.mu.Unlock()
-
-		// One disconnected visitor must not cancel a refresh shared by others.
-		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.timeout)
-		bindings, err := c.client.NativeKeyBindings(refreshCtx)
-		cancel()
-		now := c.now()
-		var response accessGuardQuotaResponse
-		if err == nil {
-			publicKeys := c.publicKeys
-			if c.publicAll {
-				publicKeys = accessGuardAutomaticPublicKeys(bindings)
-			}
-			response = accessGuardQuotaResponse{
-				Configured: true,
-				UpdatedAt:  now.UTC().Format(time.RFC3339),
-				Items:      projectAccessGuardQuotas(publicKeys, bindings, now),
-			}
+		select {
+		case <-ctx.Done():
+			return accessGuardQuotaResponse{}, accessguard.ErrUnavailable
+		case <-pending:
 		}
-		c.mu.Lock()
-		c.nextAttempt = now.Add(accessGuardCacheTTL)
-		c.failed = err != nil
-		if err == nil {
-			c.current = &response
-		}
-		close(c.pending)
-		c.pending = nil
-		result, resultErr := c.cachedLocked()
-		c.mu.Unlock()
-		return result, resultErr
 	}
+}
+
+func (c *accessGuardQuotaCache) refresh(parent context.Context) {
+	// Up to sixteen instances share four slots. Give queued refreshes a
+	// bounded batch budget without consuming their individual HTTP timeout.
+	budget := 4 * c.timeout
+	if budget > 28*time.Second {
+		budget = 28 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, budget)
+	defer cancel()
+	var bindings []json.RawMessage
+	err := accessguard.ErrUnavailable
+	select {
+	case accessGuardRefreshSlots <- struct{}{}:
+		requestCtx, requestCancel := context.WithTimeout(ctx, c.timeout)
+		bindings, err = c.client.NativeKeyBindings(requestCtx)
+		requestCancel()
+		<-accessGuardRefreshSlots
+	case <-ctx.Done():
+	}
+	now := c.now()
+	var response accessGuardQuotaResponse
+	if err == nil {
+		publicKeys := c.publicKeys
+		if c.publicAll {
+			publicKeys = accessGuardAutomaticPublicKeys(bindings)
+		}
+		response = accessGuardQuotaResponse{
+			Configured: true, UpdatedAt: now.UTC().Format(time.RFC3339),
+			Items: projectAccessGuardQuotas(publicKeys, bindings, now),
+		}
+	}
+	c.mu.Lock()
+	c.nextAttempt = now.Add(accessGuardCacheTTL)
+	c.failed = err != nil
+	if err == nil {
+		c.current = &response
+	}
+	close(c.pending)
+	c.pending = nil
+	c.mu.Unlock()
 }
 
 func (c *accessGuardQuotaCache) cachedLocked() (accessGuardQuotaResponse, error) {
@@ -161,6 +190,7 @@ func (c *accessGuardQuotaCache) cachedLocked() (accessGuardQuotaResponse, error)
 		return accessGuardQuotaResponse{}, accessguard.ErrUnavailable
 	}
 	response := *c.current
+	response.Items = append([]accessGuardQuotaItem{}, response.Items...)
 	response.Stale = c.failed
 	return response, nil
 }

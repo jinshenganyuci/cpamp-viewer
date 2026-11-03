@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/Button";
 import { IconRefreshCw } from "@/components/ui/icons";
 import { useLanguageStore } from "@/stores/useLanguageStore";
+import { maskSensitiveText } from "@/utils/format";
 import type { KeyQuotaItem } from "@/viewer/api/types";
 import { useViewerKeyQuotas } from "@/viewer/hooks/useViewerKeyQuotas";
 import {
@@ -24,9 +25,18 @@ function KeyQuotaCard({
   const copy = keyQuotaCopy(language);
   const resetAt = formatQuotaTime(item.reset_at, language);
   const amounts = hasQuotaAmounts(item);
+  const name = maskSensitiveText(item.name);
+  const instanceName = maskSensitiveText(item.instance_name || "");
   return (
     <article className={styles.card}>
-      <h2 className={styles.name}>{item.name}</h2>
+      <div className={styles.cardHeading}>
+        <h2 className={styles.name}>{name}</h2>
+        {instanceName ? (
+          <p className={styles.instance}>
+            {copy.instance}: {instanceName}
+          </p>
+        ) : null}
+      </div>
       {amounts ? (
         <>
           <p className={styles.label}>{copy.remaining}</p>
@@ -45,7 +55,9 @@ function KeyQuotaCard({
             <span className={styles.period}>7D</span>
             <div
               role="progressbar"
-              aria-label={`${item.name} · ${copy.remaining}`}
+              aria-label={[name, instanceName, copy.remaining]
+                .filter(Boolean)
+                .join(" · ")}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={quotaPercent(item.remaining_percent)}
@@ -94,6 +106,9 @@ export function ViewerKeyQuotaPage() {
   const { data, loading, failed, stale, refresh } = useViewerKeyQuotas();
   const updatedAt = formatQuotaTime(data?.updated_at, language);
   const items = data?.configured ? data.items : [];
+  const warnings = [
+    ...new Set((data?.warnings || []).map(maskSensitiveText).filter(Boolean)),
+  ];
 
   return (
     <section className={styles.page} aria-busy={loading}>
@@ -120,8 +135,17 @@ export function ViewerKeyQuotaPage() {
 
       {stale && data ? (
         <p role="status" className={styles.warning}>
-          {copy.stale}
+          {data.partial_failed ? copy.partialStale : copy.stale}
         </p>
+      ) : null}
+
+      {data?.partial_failed || warnings.length ? (
+        <div role="status" className={styles.warning}>
+          {data?.partial_failed ? <p>{copy.partialFailed}</p> : null}
+          {warnings.map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </div>
       ) : null}
 
       {items.length ? (
@@ -136,9 +160,11 @@ export function ViewerKeyQuotaPage() {
             ? copy.loading
             : !data && failed
               ? copy.failed
-              : data?.configured === false
-                ? copy.notOpen
-                : copy.empty}
+              : data?.partial_failed
+                ? copy.failed
+                : data?.configured === false
+                  ? copy.notOpen
+                  : copy.empty}
         </p>
       )}
     </section>

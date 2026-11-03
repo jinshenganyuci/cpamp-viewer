@@ -12,13 +12,15 @@ import (
 
 const codexUsageCacheTTL = time.Minute
 const codexUsageURL = "https://chatgpt.com/backend-api/wham/usage"
+const codexResetCreditsURL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 
 type codexUsageResult struct {
-	Windows    []quotaWindow
-	Plan       string
-	ObservedAt int64
-	Valid      bool
-	Stale      bool
+	ResetCredits *quotaResetCredits
+	Windows      []quotaWindow
+	Plan         string
+	ObservedAt   int64
+	Valid        bool
+	Stale        bool
 }
 
 // Only the safe projection survives a refresh. Credential metadata and raw
@@ -57,7 +59,7 @@ func (c *codexUsageCache) snapshot(ctx context.Context, files []map[string]any) 
 		if c.now().Before(c.nextAttempt) {
 			current := c.current
 			c.mu.Unlock()
-			return codexUsageForFiles(current, files)
+			return codexUsageForFiles(current, files, c.now().UnixMilli())
 		}
 		if c.pending == nil {
 			c.pending = make(chan struct{})
@@ -87,7 +89,7 @@ func (c *codexUsageCache) snapshot(ctx context.Context, files []map[string]any) 
 	}
 }
 
-func codexUsageForFiles(current map[string]codexUsageResult, files []map[string]any) map[string]codexUsageResult {
+func codexUsageForFiles(current map[string]codexUsageResult, files []map[string]any, now int64) map[string]codexUsageResult {
 	selected := make(map[string]codexUsageResult)
 	for _, file := range files {
 		if strings.ToLower(stringValue(file["provider"], file["type"])) != "codex" {
@@ -98,6 +100,7 @@ func codexUsageForFiles(current map[string]codexUsageResult, files []map[string]
 			if boolValue(file["disabled"]) {
 				result.Stale = true
 			}
+			result.ResetCredits = currentResetCredits(result.ResetCredits, now, boolValue(file["disabled"]))
 			selected[key] = result
 		}
 	}
@@ -134,10 +137,12 @@ func (c *codexUsageCache) refresh(ctx context.Context, files []map[string]any, p
 			defer workers.Done()
 			for task := range jobs {
 				result := c.fetch(ctx, task.file)
+				credits := mergeResetCredits(result.ResetCredits, previous[task.key].ResetCredits, c.now().UnixMilli())
 				if !result.Valid {
 					result = previous[task.key]
 					result.Stale = true
 				}
+				result.ResetCredits = credits
 				results <- outcome{task.key, result}
 			}
 		}()
@@ -156,6 +161,21 @@ func (c *codexUsageCache) fetch(ctx context.Context, file map[string]any) codexU
 	if c.client == nil || boolValue(file["disabled"]) || !codexUsageIdentityValid(index) || ctx.Err() != nil {
 		return codexUsageResult{}
 	}
+	payload := c.readProvider(ctx, file, codexUsageURL)
+	observedAt := c.now().UnixMilli()
+	windows, plan, valid := projectCodexUsage(payload, observedAt)
+	// The reset inventory is independent: a detail failure must not discard
+	// valid quota windows, and an unavailable usage endpoint can still leave
+	// a readable reset-credit inventory.
+	details := c.readProvider(ctx, file, codexResetCreditsURL)
+	credits := projectResetCredits(payload, details, c.now().UnixMilli())
+	return codexUsageResult{Windows: windows, Plan: plan, ObservedAt: observedAt, Valid: valid, ResetCredits: credits}
+}
+
+func (c *codexUsageCache) readProvider(ctx context.Context, file map[string]any, destination string) map[string]any {
+	if destination != codexUsageURL && destination != codexResetCreditsURL {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	headers := map[string]string{
@@ -164,39 +184,39 @@ func (c *codexUsageCache) fetch(ctx context.Context, file map[string]any) codexU
 		"Accept":        "application/json",
 		"User-Agent":    "codex-tui/0.149.1 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.149.1)",
 	}
+	if destination == codexResetCreditsURL {
+		headers["OpenAI-Beta"] = "codex-1"
+		headers["Originator"] = "Codex Desktop"
+	}
 	if accountID := codexUsageAccountID(file); accountID != "" {
 		headers["Chatgpt-Account-Id"] = accountID
 	}
-	// The visitor cannot choose a destination, method, credential, header or
-	// body. CPA substitutes the selected account's token for this GET only.
 	body := struct {
 		AuthIndex string            `json:"auth_index"`
 		Method    string            `json:"method"`
 		URL       string            `json:"url"`
 		Header    map[string]string `json:"header"`
-	}{index, "GET", codexUsageURL, headers}
+	}{strings.TrimSpace(stringValue(file["auth_index"], file["authIndex"])), "GET", destination, headers}
 	var response struct {
 		Status int             `json:"status_code"`
 		Body   json.RawMessage `json:"body"`
 	}
 	if err := c.client.PostJSON(ctx, "/v0/management/api-call", body, &response); err != nil || response.Status < 200 || response.Status >= 300 {
-		return codexUsageResult{}
+		return nil
 	}
 	raw := response.Body
 	if len(raw) > 0 && raw[0] == '"' {
 		var text string
 		if json.Unmarshal(raw, &text) != nil {
-			return codexUsageResult{}
+			return nil
 		}
 		raw = []byte(text)
 	}
 	var payload map[string]any
 	if json.Unmarshal(raw, &payload) != nil {
-		return codexUsageResult{}
+		return nil
 	}
-	observedAt := c.now().UnixMilli()
-	windows, plan, valid := projectCodexUsage(payload, observedAt)
-	return codexUsageResult{Windows: windows, Plan: plan, ObservedAt: observedAt, Valid: valid}
+	return payload
 }
 
 func codexUsageIdentityValid(value string) bool {

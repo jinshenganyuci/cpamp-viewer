@@ -1,3 +1,4 @@
+import { withViewerInstance } from "./instance";
 import type {
   MonitoringAnalyticsFilters,
   MonitoringAnalyticsInclude,
@@ -8,6 +9,7 @@ import type {
   ViewerAlias,
   ViewerAnalyticsRequest,
   ViewerAnalyticsResponse,
+  ViewerInstanceIdentity,
 } from "@/viewer/model/viewerTypes";
 
 type JsonRecord = Record<string, unknown>;
@@ -55,6 +57,26 @@ const copyViewerIdentityFields = (record: JsonRecord) => {
     readString(record.account_display) ||
     readString(record.auth_file_display);
   if (displayLabel && !readString(record.label)) record.label = displayLabel;
+  // Preserve IDs/snapshots used for filtering; decorate only visible labels.
+  if (readString(record.instance_name)) {
+    for (const key of [
+      "label",
+      "display",
+      "api_key_alias",
+      "account_display",
+      "auth_label_display",
+      "auth_file_display",
+      "project_display",
+      "source_display",
+    ]) {
+      const label = readString(record[key]);
+      if (label)
+        record[key] = withViewerInstance(
+          label,
+          record as ViewerInstanceIdentity,
+        );
+    }
+  }
 };
 
 const normalizeViewerValue = (value: unknown): unknown => {
@@ -109,14 +131,21 @@ export const buildViewerApiKeyDisplayMap = (
   ...responses: Array<ViewerAnalyticsResponse | null | undefined>
 ): Map<string, ApiKeyDisplayInfo> => {
   const displayMap = new Map<string, ApiKeyDisplayInfo>();
-  const add = (rawId: unknown, rawAlias: unknown) => {
+  const add = (
+    rawId: unknown,
+    rawAlias: unknown,
+    instance: ViewerInstanceIdentity = {},
+  ) => {
     const id = readString(rawId).toLowerCase();
-    const alias = readString(rawAlias);
-    if (!isViewerApiKeyId(id) || !alias) return;
-    displayMap.set(id, { label: alias, masked: `Key ${id.slice(-6)}` });
+    const alias = withViewerInstance(readString(rawAlias), instance);
+    if (!isViewerApiKeyId(id) || !readString(rawAlias)) return;
+    displayMap.set(id, {
+      label: alias,
+      masked: withViewerInstance(`Key ${id.slice(-6)}`, instance),
+    });
   };
 
-  aliases.forEach((entry) => add(entry.id, entry.alias));
+  aliases.forEach((entry) => add(entry.id, entry.alias, entry));
 
   const collectInlineAliases = (value: unknown) => {
     if (Array.isArray(value)) {
@@ -124,7 +153,7 @@ export const buildViewerApiKeyDisplayMap = (
       return;
     }
     if (!isRecord(value)) return;
-    add(value.api_key_id, value.api_key_alias);
+    add(value.api_key_id, value.api_key_alias, value as ViewerInstanceIdentity);
     Object.values(value).forEach(collectInlineAliases);
   };
   responses.forEach(collectInlineAliases);
@@ -147,7 +176,16 @@ export const buildViewerAuthFileDisplayMap = (
   return new Map(
     options
       .filter(isRecord)
-      .map((option) => [readString(option.id), readString(option.display)] as const)
+      .map(
+        (option) =>
+          [
+            readString(option.id),
+            withViewerInstance(
+              readString(option.display),
+              option as ViewerInstanceIdentity,
+            ),
+          ] as const,
+      )
       .filter(([id, display]) => isViewerApiKeyId(id) && Boolean(display)),
   );
 };

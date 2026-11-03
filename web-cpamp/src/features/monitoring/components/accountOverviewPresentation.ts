@@ -61,7 +61,8 @@ export type CacheTokenPresentation = {
   value: string;
 };
 
-export const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`;
+export const formatPercent = (value: number | null) =>
+  value === null || !Number.isFinite(value) ? '--' : `${(value * 100).toFixed(1)}%`;
 
 export const formatAccountQuotaResetDisplay = (
   resetAtMs: number | null | undefined,

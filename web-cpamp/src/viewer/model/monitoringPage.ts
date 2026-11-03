@@ -116,8 +116,7 @@ export const buildViewerMonitoringInitialQuery = (
       ? selectedStatusValue
       : "all";
   const selectedAccount = readViewerIdParam(params, "account") || "all";
-  const selectedApiKeyId =
-    readViewerIdParam(params, "api_key_hash") || "all";
+  const selectedApiKeyId = readViewerIdParam(params, "api_key_hash") || "all";
   const selectedAuthFile = readViewerIdParam(params, "auth_file");
   const selectedProjectId = readViewerIdParam(params, "project_id");
   const selectedRequestType = readTextParam(params, "request_type");
@@ -143,15 +142,15 @@ export const buildViewerMonitoringInitialQuery = (
     selectedRequestType,
     openRealtime: Boolean(
       hasRange ||
-        searchInput ||
-        selectedAccount !== "all" ||
-        selectedProvider !== "all" ||
-        selectedModel !== "all" ||
-        selectedApiKeyId !== "all" ||
-        selectedStatus !== "all" ||
-        selectedAuthFile ||
-        selectedProjectId ||
-        selectedRequestType,
+      searchInput ||
+      selectedAccount !== "all" ||
+      selectedProvider !== "all" ||
+      selectedModel !== "all" ||
+      selectedApiKeyId !== "all" ||
+      selectedStatus !== "all" ||
+      selectedAuthFile ||
+      selectedProjectId ||
+      selectedRequestType,
     ),
   };
 };
@@ -480,11 +479,13 @@ export const buildViewerPrimarySummaryCards = ({
     value: formatPercent(summary.successRate),
     meta: formatDurationMs(summary.averageLatencyMs, { locale }),
     tone:
-      summary.successRate >= 0.95
-        ? "good"
-        : summary.successRate >= 0.85
-          ? "warn"
-          : "bad",
+      summary.successRate === null
+        ? undefined
+        : summary.successRate >= 0.95
+          ? "good"
+          : summary.successRate >= 0.85
+            ? "warn"
+            : "bad",
     icon: "success",
     accent: "green",
   },
@@ -593,7 +594,7 @@ export const buildViewerSecondarySummaryCards = (
       fullLabel: t("monitoring.cached_tokens"),
       value: formatCompactNumber(totalCacheTokens),
       valueTitle: formatFullNumber(totalCacheTokens, locale),
-      meta: `${t("monitoring.cache_hit_rate")} ${formatPercent(cacheHitRate)}`,
+      meta: `${t("monitoring.cache_hit_rate")} ${summary.cacheHitRate === null ? "--" : formatPercent(cacheHitRate)}`,
       variant: "secondary",
       icon: "cache",
       accent: "teal",
@@ -620,6 +621,14 @@ export const buildViewerPaginationState = <T>(
   };
 };
 
+export const buildViewerEventStreamKey = (row: MonitoringEventRow) =>
+  [
+    row.accountIdentity || row.sourceKey || row.account,
+    row.provider,
+    row.model,
+    row.channel,
+  ].join("::");
+
 export const buildViewerRealtimeLogRows = (
   rows: MonitoringEventRow[],
 ): ViewerRealtimeLogRow[] => {
@@ -632,9 +641,7 @@ export const buildViewerRealtimeLogRows = (
     { total: number; success: number; pattern: boolean[] }
   >();
   const enriched = sortedAsc.map((row) => {
-    const streamKey = [row.account, row.provider, row.model, row.channel].join(
-      "::",
-    );
+    const streamKey = buildViewerEventStreamKey(row);
     const previous = metricsByStream.get(streamKey) ?? {
       total: 0,
       success: 0,

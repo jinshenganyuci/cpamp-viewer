@@ -111,3 +111,130 @@ func TestQuotaSourcesRejectAmbiguousOrOversizedInput(t *testing.T) {
 		}
 	}
 }
+
+func TestQuotaSourceAccessGuardSelectionPreservesOverrides(t *testing.T) {
+	for _, mode := range []string{"inline", "file"} {
+		for _, sourceType := range []string{"cpa", " CPAMP "} {
+			for _, tc := range []struct {
+				name       string
+				fields     string
+				wantAll    string
+				wantKeys   bool
+				wantLength int
+			}{
+				{name: "inherit"},
+				{name: "public all", fields: `,"access_guard_public_all":true`, wantAll: "true"},
+				{name: "explicit disabled", fields: `,"access_guard_public_all":false`, wantAll: "false"},
+				{name: "explicit empty selection", fields: `,"access_guard_public_keys":[]`, wantKeys: true},
+				{name: "selected bindings", fields: `,"access_guard_public_keys":[{"binding_id":" native-key-1 ","name":" 公开显示名 "}]`, wantKeys: true, wantLength: 1},
+			} {
+				t.Run(mode+"/"+sourceType+"/"+tc.name, func(t *testing.T) {
+					prepareConfigTest(t)
+					t.Setenv("ACCESS_GUARD_PUBLIC_ALL", "true")
+					payload := `[{"type":"` + sourceType + `","base_url":"https://secondary.example.test","admin_key":"private-secondary-key"` + tc.fields + `}]`
+					if mode == "inline" {
+						t.Setenv("VIEWER_QUOTA_SOURCES", payload)
+					} else {
+						t.Setenv("VIEWER_QUOTA_SOURCES_FILE", writeConfigFixture(t, payload))
+					}
+					cfg, err := Load()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !cfg.AccessGuardPublicAll || len(cfg.QuotaSources) != 1 {
+						t.Fatal("source selection changed the global selection or source count")
+					}
+					source := cfg.QuotaSources[0]
+					if tc.wantAll == "" {
+						if source.AccessGuardPublicAll != nil {
+							t.Fatal("missing public-all setting did not remain unspecified")
+						}
+					} else if source.AccessGuardPublicAll == nil || *source.AccessGuardPublicAll != (tc.wantAll == "true") {
+						t.Fatal("explicit public-all setting was lost")
+					}
+					if (source.AccessGuardPublicKeys != nil) != tc.wantKeys || len(source.AccessGuardPublicKeys) != tc.wantLength {
+						t.Fatal("explicit empty selection was confused with an unspecified selection")
+					}
+					if tc.wantLength == 1 && source.AccessGuardPublicKeys[0] != (AccessGuardPublicKey{BindingID: "native-key-1", Name: "公开显示名"}) {
+						t.Fatal("public binding selection was not normalized")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestQuotaSourceAccessGuardRejectsUnsafeSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		fields string
+	}{
+		{"all null", `"access_guard_public_all":null`},
+		{"all string", `"access_guard_public_all":"false"`},
+		{"all number", `"access_guard_public_all":0`},
+		{"all object", `"access_guard_public_all":{}`},
+		{"all array", `"access_guard_public_all":[]`},
+		{"both empty", `"access_guard_public_all":false,"access_guard_public_keys":[]`},
+		{"both enabled", `"access_guard_public_all":true,"access_guard_public_keys":[]`},
+		{"both null", `"access_guard_public_all":null,"access_guard_public_keys":null`},
+		{"keys null", `"access_guard_public_keys":null`},
+		{"keys object", `"access_guard_public_keys":{}`},
+		{"keys wrapped object", `"access_guard_public_keys":{"keys":[]}`},
+		{"keys string", `"access_guard_public_keys":"private-selection-secret"`},
+		{"keys boolean", `"access_guard_public_keys":false`},
+		{"null entry", `"access_guard_public_keys":[null]`},
+		{"missing id", `"access_guard_public_keys":[{"name":"private-selection-secret"}]`},
+		{"missing name", `"access_guard_public_keys":[{"binding_id":"private-selection-secret"}]`},
+		{"empty id", `"access_guard_public_keys":[{"binding_id":" ","name":"private-selection-secret"}]`},
+		{"empty name", `"access_guard_public_keys":[{"binding_id":"private-selection-secret","name":" "}]`},
+		{"id type", `"access_guard_public_keys":[{"binding_id":5,"name":"private-selection-secret"}]`},
+		{"name type", `"access_guard_public_keys":[{"binding_id":"private-selection-secret","name":false}]`},
+		{"id control", `"access_guard_public_keys":[{"binding_id":"private-selection-secret\nvalue","name":"label"}]`},
+		{"name control", `"access_guard_public_keys":[{"binding_id":"id","name":"private-selection-secret\nvalue"}]`},
+		{"long id", `"access_guard_public_keys":[{"binding_id":"` + strings.Repeat("x", 129) + `","name":"private-selection-secret"}]`},
+		{"long name", `"access_guard_public_keys":[{"binding_id":"private-selection-secret","name":"` + strings.Repeat("x", 257) + `"}]`},
+		{"duplicate ids after trim", `"access_guard_public_keys":[{"binding_id":"id","name":"private-selection-secret"},{"binding_id":" id ","name":"second"}]`},
+		{"entry unknown field", `"access_guard_public_keys":[{"binding_id":"id","name":"label","private-selection-secret":"/private-selection-secret/config.json"}]`},
+		{"entry duplicate field", `"access_guard_public_keys":[{"binding_id":"private-selection-secret","binding_id":"id","name":"label"}]`},
+		{"entry case alias", `"access_guard_public_keys":[{"Binding_ID":"private-selection-secret","name":"label"}]`},
+		{"entry limit", `"access_guard_public_keys":[` + strings.Repeat(`{"binding_id":"id","name":"label"},`, 256) + `{"binding_id":"last","name":"private-selection-secret"}]`},
+		{"source duplicate all", `"access_guard_public_all":false,"access_guard_public_all":true`},
+		{"source duplicate keys", `"access_guard_public_keys":[],"access_guard_public_keys":[]`},
+		{"source case alias", `"Access_Guard_Public_All":true`},
+		{"source unknown field", `"access_guard_public_all":true,"private-selection-secret":"/private-selection-secret/config.json"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prepareConfigTest(t)
+			t.Setenv("VIEWER_QUOTA_SOURCES", `[{"type":"cpa","base_url":"https://secondary.example.test","admin_key":"private-selection-secret",`+tc.fields+`}]`)
+			_, err := Load()
+			if err == nil {
+				t.Fatal("accepted invalid public selection")
+			}
+			if strings.Contains(err.Error(), "private-selection-secret") || strings.Contains(err.Error(), "secondary.example.test") {
+				t.Fatal("invalid public selection leaked configuration contents")
+			}
+		})
+	}
+}
+
+func TestSub2APIQuotaSourceRejectsAnyAccessGuardSelection(t *testing.T) {
+	for _, fields := range []string{
+		`"access_guard_public_all":true`,
+		`"access_guard_public_all":false`,
+		`"access_guard_public_all":null`,
+		`"access_guard_public_keys":[]`,
+		`"access_guard_public_keys":null`,
+		`"access_guard_public_keys":[{"binding_id":"private-selection-secret","name":"label"}]`,
+		`"access_guard_public_all":false,"access_guard_public_keys":[]`,
+	} {
+		prepareConfigTest(t)
+		t.Setenv("VIEWER_QUOTA_SOURCES", `[{"type":"sub2api","base_url":"https://sub.example.test","admin_api_key":"private-selection-secret",`+fields+`}]`)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "only supported for CPA sources") {
+			t.Fatal("Sub2API public selection was not rejected with a safe source-type error")
+		}
+		if strings.Contains(err.Error(), "private-selection-secret") {
+			t.Fatal("Sub2API public selection error leaked configuration contents")
+		}
+	}
+}

@@ -5,6 +5,7 @@ const english = {
   refresh: "Refresh",
   refreshing: "Refreshing…",
   updated: "Updated",
+  instance: "Instance",
   remaining: "Weekly quota remaining",
   total: "Weekly limit",
   resets: "Resets",
@@ -18,6 +19,10 @@ const english = {
   loading: "Loading quotas…",
   failed: "Quotas are temporarily unavailable. Please try again later.",
   stale: "Quotas have not updated. Showing the last available data.",
+  partialFailed:
+    "Some instances could not refresh their quotas. Results may be incomplete.",
+  partialStale:
+    "Some quotas have not updated. Results include previously available data.",
 };
 
 export function keyQuotaCopy(language: string): typeof english {
@@ -27,6 +32,7 @@ export function keyQuotaCopy(language: string): typeof english {
     refresh: "刷新",
     refreshing: "刷新中…",
     updated: "更新时间",
+    instance: "所属实例",
     remaining: "周额度剩余",
     total: "周总额度",
     resets: "重置时间",
@@ -40,6 +46,8 @@ export function keyQuotaCopy(language: string): typeof english {
     loading: "正在加载额度…",
     failed: "暂时无法获取额度，请稍后再试。",
     stale: "额度暂未更新，以下为上次数据。",
+    partialFailed: "部分实例额度暂未更新，当前结果可能不完整。",
+    partialStale: "部分额度暂未更新，以下包含上次数据。",
   };
 }
 

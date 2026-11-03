@@ -95,3 +95,23 @@ export function viewerQuotaObservedTime(value: number | undefined) {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
+
+export function formatViewerResetCreditRemaining(
+  expiresAt: number,
+  now = Date.now(),
+) {
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) return "到期时间未知";
+  const remaining = expiresAt - now;
+  if (remaining <= 0) return "已过期";
+  if (remaining >= 86_400_000)
+    return `剩余 ${Math.ceil(remaining / 86_400_000)} 天`;
+  if (remaining >= 3_600_000)
+    return `剩余 ${Math.ceil(remaining / 3_600_000)} 小时`;
+  return `剩余 ${Math.max(1, Math.ceil(remaining / 60_000))} 分钟`;
+}
+
+export function viewerResetCreditCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}

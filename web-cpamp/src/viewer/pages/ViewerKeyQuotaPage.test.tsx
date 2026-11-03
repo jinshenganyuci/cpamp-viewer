@@ -68,6 +68,57 @@ describe("public Key quota page", () => {
     expect(renderer?.root.findAllByProps({ role: "progressbar" })).toHaveLength(1);
   });
 
+  it("distinguishes matching public names by instance without exposing instance identifiers", async () => {
+    const text = await render([
+      { id: "view_east", name: "公开用户", state: "unlimited", instance_id: "instance_east_hidden", instance_name: "东站" },
+      { id: "view_west", name: "公开用户", state: "unlimited", instance_id: "instance_west_hidden", instance_name: "西站 authorization: Bearer instance-secret-value" },
+    ]);
+    expect(renderer?.root.findAllByType("article")).toHaveLength(2);
+    expect(text).toContain("所属实例");
+    expect(text).toContain("东站");
+    expect(text).toContain("西站");
+    expect(text).not.toContain("instance_east_hidden");
+    expect(text).not.toContain("instance_west_hidden");
+    expect(text).not.toContain("instance-secret-value");
+  });
+
+  it("keeps successful quotas visible with safe partial failure warnings", async () => {
+    mock.result.data = {
+      configured: true,
+      stale: false,
+      partial_failed: true,
+      warnings: ["西站：额度暂不可用", "西站：额度暂不可用", "备用站 authorization: Bearer test-secret-value"],
+      items: [{ id: "view_east", name: "可用用户", state: "unlimited", instance_name: "东站" }],
+    };
+    const text = await render();
+    expect(text).toContain("可用用户");
+    expect(text).toContain("部分实例额度暂未更新，当前结果可能不完整。");
+    expect(text.match(/西站：额度暂不可用/g)).toHaveLength(1);
+    expect(text).not.toContain("test-secret-value");
+    expect(text).not.toContain("额度暂未更新，以下为上次数据。");
+  });
+
+  it("does not describe an empty partial failure as quotas being unpublished", async () => {
+    mock.result.data = { configured: false, stale: false, partial_failed: true, warnings: [], items: [] };
+    const text = await render();
+    expect(text).toContain("暂时无法获取额度，请稍后再试。");
+    expect(text).not.toContain("额度暂未开放");
+    expect(text).not.toContain("暂无公开额度");
+  });
+
+  it("identifies cached quotas in a mixed fresh and stale response", async () => {
+    mock.result.data = {
+      configured: true,
+      stale: true,
+      partial_failed: true,
+      items: [{ id: "view_cached", name: "缓存用户", state: "unlimited", instance_name: "西站" }],
+    };
+    mock.result.stale = true;
+    const text = await render();
+    expect(text).toContain("部分额度暂未更新，以下包含上次数据。");
+    expect(text).toContain("缓存用户");
+  });
+
   it("shows that quota viewing is not open for an unconfigured integration", async () => {
     mock.result.data = { configured: false, stale: false, items: [] };
     const text = await render();

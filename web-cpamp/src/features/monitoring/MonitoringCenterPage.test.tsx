@@ -505,7 +505,7 @@ describe('MonitoringCenterPage account card', () => {
     expect(display.meta).toBe('Provider: codex');
   });
 
-  it('switches account labels between masked and full display with full tooltip text', () => {
+  it('keeps account tooltips masked until full display is selected', () => {
     const row = {
       id: 'very-long-account-name@example.com',
       account: 'very-long-account-name@example.com',
@@ -559,7 +559,8 @@ describe('MonitoringCenterPage account card', () => {
 
     const maskedCard = renderCard('masked');
     expect(maskedCard).toContain('>ver***@example.com</span>');
-    expect(maskedCard).toContain('very-long-account-name@example.com');
+    expect(maskedCard).not.toContain('very-long-account-name@example.com');
+    expect(maskedCard).toContain('title="ver***@example.com / codex"');
     expect(maskedCard).toContain('Business 5x');
     expect(maskedCard).toContain('title="Business Premium 5x"');
     expect(maskedCard).not.toContain('self_serve_business_prolite');

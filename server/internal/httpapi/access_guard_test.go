@@ -109,7 +109,7 @@ func TestAccessGuardPublishesOnlyConfiguredNamesAndQuotaFields(t *testing.T) {
 	if err := json.Unmarshal(accessGuardRaw(t, item), &object); err != nil {
 		t.Fatal(err)
 	}
-	if len(object) != 8 {
+	if len(object) != 10 || item.InstanceID == "" || item.InstanceName == "" {
 		t.Fatalf("unexpected public item fields: %s", accessGuardRaw(t, item))
 	}
 	if calls.Load() != 1 || response.Header().Get("Cache-Control") != "no-store, private" {
@@ -236,7 +236,8 @@ func TestAccessGuardRejectsMethodsParametersAndBodiesBeforeUpstream(t *testing.T
 func TestAccessGuardDisabledAndProtectedMode(t *testing.T) {
 	server := &Server{cfg: config.Config{PublicAccess: true}}
 	response := accessGuardRequest(server.Handler())
-	if response.Code != http.StatusOK || response.Body.String() != "{\"configured\":false,\"stale\":false,\"items\":[]}\n" {
+	payload := decodeAccessGuardResponse(t, response)
+	if response.Code != http.StatusOK || payload.Configured || payload.Stale || payload.PartialFailed || payload.Items == nil || len(payload.Items) != 0 || len(payload.Warnings) != 0 {
 		t.Fatalf("disabled response=%d %s", response.Code, response.Body.String())
 	}
 	server.cfg.PublicAccess = false
@@ -351,15 +352,41 @@ func TestAccessGuardInitialFailuresRemainSafeAndUseCooldown(t *testing.T) {
 }
 
 func TestAccessGuardSharedRefreshSurvivesVisitorCancellation(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			t.Error("visitor cancellation canceled shared read")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"bindings": []any{accessGuardTestBinding("native-key-1")}})
 	}))
 	defer upstream.Close()
 	server := newAccessGuardTestServer(upstream.URL)
 	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := server.accessGuard.snapshot(ctx)
+		done <- err
+	}()
+	<-started
 	cancel()
-	response, err := server.accessGuard.snapshot(ctx)
-	if err != nil || !response.Configured || len(response.Items) != 1 {
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("canceled waiter should stop waiting")
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("initiating visitor waited for shared refresh after cancellation")
+	}
+	close(release)
+	response, err := server.accessGuard.snapshot(context.Background())
+	if err != nil || !response.Configured || len(response.Items) != 1 || calls.Load() != 1 {
 		t.Fatalf("visitor cancellation invalidated shared refresh: %#v %v", response, err)
 	}
 }

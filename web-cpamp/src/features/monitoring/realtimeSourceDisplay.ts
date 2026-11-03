@@ -127,10 +127,8 @@ export const buildRealtimeSourceDisplay = (
       [
         primary,
         meta,
-        fullSource,
-        maskedSource,
-        fullAccount,
-        maskedAccount,
+        source,
+        account,
         host,
         provider,
         ...requestMetadata,

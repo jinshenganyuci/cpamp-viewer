@@ -1,0 +1,11 @@
+.warning {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}

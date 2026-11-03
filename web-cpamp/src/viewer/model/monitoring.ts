@@ -5,6 +5,7 @@ import type {
   MonitoringEventRow,
   MonitoringSummary,
 } from "@/features/monitoring/hooks/useMonitoringData";
+import { withViewerInstance } from "./instance";
 import { maskEmailLike } from "@/features/monitoring/model/base";
 import { calculateCost, type ModelPrice } from "@/utils/usage";
 import type {
@@ -14,6 +15,8 @@ import type {
   ViewerApiKeyStat,
   ViewerModelStat,
   ViewerMonitoringEvent,
+  ViewerInstanceIdentity,
+  ViewerQuotaAccount,
 } from "@/viewer/model/viewerTypes";
 
 const text = (...values: unknown[]) => {
@@ -82,7 +85,8 @@ export const buildViewerMonitoringSummary = (
     totalCalls: number(summary?.total_calls),
     successCalls: number(summary?.success_calls),
     failureCalls: number(summary?.failure_calls),
-    successRate: number(summary?.success_rate),
+    successRate:
+      summary?.success_rate === null ? null : number(summary?.success_rate),
     inputTokens: number(summary?.input_tokens),
     outputTokens: number(summary?.output_tokens),
     reasoningTokens: number(summary?.reasoning_tokens),
@@ -90,39 +94,63 @@ export const buildViewerMonitoringSummary = (
     cacheReadTokens: number(summary?.cache_read_tokens),
     cacheCreationTokens: number(summary?.cache_creation_tokens),
     cacheHitRate:
-      summary?.cache_hit_rate === undefined
-        ? undefined
-        : number(summary.cache_hit_rate),
+      summary?.cache_hit_rate === null
+        ? null
+        : summary?.cache_hit_rate === undefined
+          ? undefined
+          : number(summary.cache_hit_rate),
     totalTokens: number(summary?.total_tokens),
     totalCost: number(summary?.total_cost),
     averageLatencyMs: nullableNumber(summary?.average_latency_ms),
     rpm30m: number(summary?.rpm_30m),
     tpm30m: number(summary?.tpm_30m),
-    avgDailyRequests: number(summary?.avg_daily_requests),
-    avgDailyTokens: number(summary?.avg_daily_tokens),
+    avgDailyRequests:
+      summary?.avg_daily_requests === null
+        ? null
+        : number(summary?.avg_daily_requests),
+    avgDailyTokens:
+      summary?.avg_daily_tokens === null
+        ? null
+        : number(summary?.avg_daily_tokens),
     approxTasks: number(summary?.approx_tasks),
     approxTaskFailures: number(summary?.approx_task_failures),
-    approxTaskSuccessRate: number(summary?.approx_task_success_rate),
+    approxTaskSuccessRate:
+      summary?.approx_task_success_rate === null
+        ? null
+        : number(summary?.approx_task_success_rate),
     zeroTokenCalls: number(summary?.zero_token_calls),
     zeroTokenModels: [],
   };
 };
 
+export type ViewerMonitoringAccountRow = MonitoringAccountRow &
+  ViewerInstanceIdentity & {
+    rawAccount?: string;
+  };
+
+export type ViewerMonitoringApiKeyRow = MonitoringApiKeyRow & {
+  apiKeyOriginalLabel?: string;
+};
+
 export const buildViewerMonitoringAccountRows = (
   rows: ViewerAccountStat[] | undefined,
-): MonitoringAccountRow[] =>
+): ViewerMonitoringAccountRow[] =>
   (rows || [])
     .map((row) => {
-      const account = resolveAccountDisplay(row);
+      const rawAccount = resolveAccountDisplay(row);
+      const account = withViewerInstance(rawAccount, row);
       const id = text(row.id, row.account_id, account);
       const lastSeenAt = number(row.last_seen_ms);
       return {
         id,
         account,
+        rawAccount,
+        instance_id: row.instance_id,
+        instance_name: row.instance_name,
         provider: text(row.auth_provider_snapshot).toLocaleLowerCase(),
         filterValue: text(row.account_id, id),
         displayAccount: account,
-        accountMasked: maskEmailLike(account),
+        accountMasked: withViewerInstance(maskEmailLike(rawAccount), row),
         authLabels: unique([
           row.auth_label_display,
           row.auth_label_snapshot,
@@ -146,7 +174,7 @@ export const buildViewerMonitoringAccountRows = (
         lastSeenAt,
         recentPattern: [],
         models: modelRows(row.models, lastSeenAt),
-      } satisfies MonitoringAccountRow;
+      } satisfies ViewerMonitoringAccountRow;
     })
     .sort(
       (left, right) =>
@@ -160,7 +188,7 @@ const resolveApiKeyId = (row: ViewerApiKeyStat) => text(row.api_key_id, row.id);
 export const buildViewerMonitoringApiKeyRows = (
   rows: ViewerApiKeyStat[] | undefined,
   aliases: ViewerAlias[],
-): MonitoringApiKeyRow[] => {
+): ViewerMonitoringApiKeyRow[] => {
   const aliasMap = new Map(aliases.map((item) => [item.id, item.alias]));
   return (rows || [])
     .map((row) => {
@@ -177,8 +205,9 @@ export const buildViewerMonitoringApiKeyRows = (
       return {
         id: id || row.id,
         apiKeyHash: selectable ? id : "",
-        apiKeyLabel: label,
-        apiKeyMasked: label,
+        apiKeyLabel: withViewerInstance(label, row),
+        apiKeyMasked: withViewerInstance(label, row),
+        apiKeyOriginalLabel: label,
         isUnknown: !selectable,
         authLabels: unique([row.auth_label_display, row.auth_label_snapshot]),
         sourceLabels: unique([
@@ -201,7 +230,7 @@ export const buildViewerMonitoringApiKeyRows = (
         averageLatencyMs: nullableNumber(row.average_latency_ms),
         lastSeenAt,
         models: modelRows(row.models, lastSeenAt),
-      } satisfies MonitoringApiKeyRow;
+      } satisfies ViewerMonitoringApiKeyRow;
     })
     .sort(
       (left, right) =>
@@ -211,7 +240,7 @@ export const buildViewerMonitoringApiKeyRows = (
 };
 
 export const findViewerApiKeyIdsByAlias = (
-  rows: MonitoringApiKeyRow[],
+  rows: ViewerMonitoringApiKeyRow[],
   query: string,
 ) => {
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -220,13 +249,15 @@ export const findViewerApiKeyIdsByAlias = (
     .filter(
       (row) =>
         /^view_[a-f0-9]{12}$/i.test(row.id) &&
-        row.apiKeyLabel.trim().toLocaleLowerCase() === normalizedQuery,
+        [row.apiKeyLabel, row.apiKeyOriginalLabel].some(
+          (label) => label?.trim().toLocaleLowerCase() === normalizedQuery,
+        ),
     )
     .map((row) => row.id);
 };
 
 export const resolveViewerApiKeySearchScope = (
-  rows: MonitoringApiKeyRow[],
+  rows: ViewerMonitoringApiKeyRow[],
   query: string,
   selectedApiKeyId: string,
 ) => {
@@ -267,11 +298,15 @@ const formatApiKeyLabel = (
   );
 };
 
+export type ViewerMonitoringEventRow = MonitoringEventRow &
+  ViewerInstanceIdentity;
+
 export const buildViewerMonitoringEventRows = (
   rows: ViewerMonitoringEvent[] | undefined,
   aliases: ViewerAlias[],
   modelPrices: Record<string, ModelPrice> = {},
-): MonitoringEventRow[] => {
+  instancePrices: Record<string, Record<string, ModelPrice>> = {},
+): ViewerMonitoringEventRow[] => {
   const aliasMap = new Map(aliases.map((item) => [item.id, item.alias]));
   return (rows || [])
     .map((row) => {
@@ -300,7 +335,10 @@ export const buildViewerMonitoringEventRows = (
         row.auth_label_snapshot,
         source,
       );
-      const apiKeyLabel = formatApiKeyLabel(row, aliasMap);
+      const apiKeyLabel = withViewerInstance(
+        formatApiKeyLabel(row, aliasMap),
+        row,
+      );
       const latencyMs = nullableNumber(row.latency_ms ?? row.duration_ms);
       const outputTokens = number(row.output_tokens);
       const provider = text(
@@ -308,6 +346,14 @@ export const buildViewerMonitoringEventRows = (
         row.source_display,
         "-",
       );
+      const displaySource =
+        source === provider || /^view_[a-f0-9]{12}$/i.test(source)
+          ? source
+          : withViewerInstance(source, row);
+      const maskedSource =
+        source === provider || /^view_[a-f0-9]{12}$/i.test(source)
+          ? maskEmailLike(source)
+          : withViewerInstance(maskEmailLike(source), row);
       const endpointPath = text(row.path, row.endpoint, "-");
       const endpointMethod = text(row.method, "POST");
       const id = text(row.event_hash, `${timestampMs}-${row.model}`);
@@ -315,9 +361,19 @@ export const buildViewerMonitoringEventRows = (
       const inputTokens = number(row.input_tokens);
       const failed = Boolean(row.failed);
       const analyticsModel = text(row.analytics_model, row.model, "unknown");
-      const requestedModel = text(row.requested_model, row.model, analyticsModel);
+      const requestedModel = text(
+        row.requested_model,
+        row.model,
+        analyticsModel,
+      );
+      const prices = row.instance_id
+        ? instancePrices[row.instance_id]
+        : modelPrices;
+      const hasInstancePrice = Boolean(
+        prices && (prices[analyticsModel] || prices[requestedModel]),
+      );
       const totalCost =
-        row.cost === undefined
+        row.cost === undefined && (!row.instance_id || hasInstancePrice)
           ? calculateCost(
               {
                 __modelName: analyticsModel,
@@ -338,12 +394,14 @@ export const buildViewerMonitoringEventRows = (
                   total_tokens: totalTokens,
                 },
               },
-              modelPrices,
+              prices ?? {},
             )
           : number(row.cost);
 
       return {
         id,
+        instance_id: row.instance_id,
+        instance_name: row.instance_name,
         timestamp: new Date(timestampMs).toISOString(),
         timestampMs,
         dayKey: new Date(timestampMs).toLocaleDateString("sv-SE"),
@@ -358,13 +416,13 @@ export const buildViewerMonitoringEventRows = (
         endpointMethod,
         endpointPath,
         sourceKey: text(row.source_id, row.auth_id, id),
-        source,
+        source: displaySource,
         sourceIdentity: text(row.source_id),
         sourceHashIdentity: text(row.source_id),
-        sourceMasked: maskEmailLike(source),
-        account,
+        sourceMasked: maskedSource,
+        account: withViewerInstance(account, row),
         accountIdentity: text(row.account_id),
-        accountMasked: maskEmailLike(account),
+        accountMasked: withViewerInstance(maskEmailLike(account), row),
         authIndex: text(row.account_id, row.auth_id, row.source_id, "-"),
         authIndexIdentity: text(row.auth_id),
         authIndexMasked: text(row.account_id, row.auth_id, row.source_id, "-"),
@@ -398,6 +456,12 @@ export const buildViewerMonitoringEventRows = (
         cacheCreationTokens: number(row.cache_creation_tokens),
         totalTokens,
         totalCost,
+        costKnown:
+          row.cost !== undefined
+            ? true
+            : row.instance_id
+              ? hasInstancePrice
+              : undefined,
         reasoningEffort: text(row.reasoning_effort) || undefined,
         serviceTier: text(row.service_tier) || undefined,
         requestServiceTier: text(row.request_service_tier) || undefined,
@@ -422,6 +486,7 @@ export const buildViewerMonitoringEventRows = (
           account,
           authLabel,
           apiKeyLabel,
+          row.instance_name,
           provider,
           endpointMethod,
           endpointPath,
@@ -436,7 +501,7 @@ export const buildViewerMonitoringEventRows = (
           .filter(Boolean)
           .join(" ")
           .toLowerCase(),
-      } satisfies MonitoringEventRow;
+      } satisfies ViewerMonitoringEventRow;
     })
     .filter((row) => row.timestampMs > 0)
     .sort((left, right) => right.timestampMs - left.timestampMs);
@@ -458,3 +523,91 @@ export const mergeViewerMonitoringEvents = (
     (left, right) => number(right.timestamp_ms) - number(left.timestamp_ms),
   );
 };
+
+export const buildViewerApiKeyFilterRows = (
+  aliases: ViewerAlias[],
+  ...responses: Array<ViewerAnalyticsResponse | null | undefined>
+): ViewerMonitoringApiKeyRow[] => {
+  const candidates: ViewerApiKeyStat[] = [];
+  for (const response of responses) {
+    for (const options of [
+      response?.filter_options,
+      response?.filter_selectors,
+    ]) {
+      candidates.push(...(options?.api_key_stats ?? []));
+      for (const option of options?.api_keys ?? []) {
+        candidates.push(
+          typeof option === "string"
+            ? { id: option }
+            : { ...option, api_key_alias: option.alias || option.label },
+        );
+      }
+    }
+    candidates.push(...(response?.api_key_stats ?? []));
+    for (const event of response?.events?.items ?? []) {
+      if (event.api_key_id) candidates.push({ ...event, id: event.api_key_id });
+    }
+  }
+  candidates.push(
+    ...aliases.map((alias) => ({ ...alias, api_key_alias: alias.alias })),
+  );
+  const uniqueRows = new Map<string, ViewerApiKeyStat>();
+  for (const candidate of candidates) {
+    const id = resolveApiKeyId(candidate);
+    if (
+      !/^view_[a-f0-9]{12}$/i.test(id) ||
+      candidate.api_key_selectable === false
+    )
+      continue;
+    const previous = uniqueRows.get(id);
+    uniqueRows.set(
+      id,
+      previous
+        ? {
+            ...candidate,
+            ...previous,
+            instance_id: previous.instance_id || candidate.instance_id,
+            instance_name: previous.instance_name || candidate.instance_name,
+            api_key_alias: previous.api_key_alias || candidate.api_key_alias,
+          }
+        : candidate,
+    );
+  }
+  return buildViewerMonitoringApiKeyRows([...uniqueRows.values()], aliases);
+};
+
+export const findViewerQuotaAccounts = (
+  row: ViewerMonitoringAccountRow,
+  accounts: Array<ViewerQuotaAccount & ViewerInstanceIdentity>,
+) => {
+  const normalize = (value: string | undefined) =>
+    value?.trim().toLowerCase() || "";
+  const eligible = accounts
+    .filter((account) => account.source !== "sub2api")
+    .filter((account) =>
+      row.instance_id || account.instance_id
+        ? row.instance_id === account.instance_id
+        : true,
+    );
+  const provider = normalize(row.provider);
+  const identities = new Set(
+    [row.rawAccount || row.account, ...row.authLabels].map(normalize),
+  );
+  const matched = eligible.filter(
+    (account) =>
+      identities.has(normalize(account.display_name)) &&
+      (!provider ||
+        !account.provider ||
+        normalize(account.provider) === provider),
+  );
+  if (matched.length) return matched;
+  if (!provider) return [];
+  const providerMatches = eligible.filter(
+    (account) => normalize(account.provider) === provider,
+  );
+  return providerMatches.length === 1 ? providerMatches : [];
+};
+
+export const viewerEventPageFeedback = (response: ViewerAnalyticsResponse) =>
+  (response.warnings ?? []).join("；") ||
+  (response.partial_failed ? "部分实例加载失败，可重试加载更多。" : "");

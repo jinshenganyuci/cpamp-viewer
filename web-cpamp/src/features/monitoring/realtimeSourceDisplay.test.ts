@@ -36,6 +36,7 @@ describe('buildRealtimeSourceDisplay request metadata', () => {
     const display = buildRealtimeSourceDisplay(row, t, 'masked');
 
     expect(display.requestMetadataTitle).toBe('');
+    expect(display.title).not.toContain('alice@example.com');
     expect(display.title).not.toContain('192.0.2.10');
     expect(display.title).not.toContain('203.0.113.5');
     expect(display.title).not.toContain('test-client/1.0');

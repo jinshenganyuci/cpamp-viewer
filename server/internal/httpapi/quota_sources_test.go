@@ -18,7 +18,7 @@ import (
 
 func TestMultipleQuotaSourcesKeepCredentialsCachesAndIdentitiesSeparate(t *testing.T) {
 	var primaryCalls, secondCalls atomic.Int64
-	newCPA := func(key string, used float64, calls *atomic.Int64) *httptest.Server {
+	newCPA := func(key string, used float64, resetCount int, calls *atomic.Int64) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer "+key || r.Header.Get("X-API-Key") != "" {
 				t.Error("CPA received another instance's credential")
@@ -30,7 +30,35 @@ func TestMultipleQuotaSourcesKeepCredentialsCachesAndIdentitiesSeparate(t *testi
 				_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}})
 			case "/v0/management/api-call":
 				calls.Add(1)
-				codexLiveTestReply(w, http.StatusOK, codexLiveTestBody(used))
+				var delegated struct {
+					AuthIndex string            `json:"auth_index"`
+					Method    string            `json:"method"`
+					URL       string            `json:"url"`
+					Header    map[string]string `json:"header"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&delegated); err != nil {
+					t.Error(err)
+				}
+				if r.Method != http.MethodPost || delegated.Method != http.MethodGet || delegated.AuthIndex != "same-index" || delegated.Header["Authorization"] != "Bearer $TOKEN$" || delegated.Header["Chatgpt-Account-Id"] != "same-account" {
+					t.Errorf("unexpected delegated read: %#v", delegated)
+				}
+				switch delegated.URL {
+				case codexUsageURL:
+					codexLiveTestReply(w, http.StatusOK, codexLiveTestBody(used))
+				case codexResetCreditsURL:
+					credits := make([]map[string]any, resetCount)
+					for index := range credits {
+						credits[index] = map[string]any{
+							"id": "PRIVATE_RESET_ID", "reset_type": "codex_rate_limits", "status": "available",
+							"expires_at": codexLiveTestTime.Add(time.Duration(index+1) * 24 * time.Hour).Format(time.RFC3339),
+						}
+					}
+					body, _ := json.Marshal(map[string]any{"available_count": resetCount, "credits": credits})
+					codexLiveTestReply(w, http.StatusOK, string(body))
+				default:
+					t.Errorf("unexpected quota or reset mutation URL: %s", delegated.URL)
+					w.WriteHeader(http.StatusBadRequest)
+				}
 			default:
 				t.Errorf("unexpected CPA request: %s", r.URL.Path)
 				http.NotFound(w, r)
@@ -60,15 +88,15 @@ func TestMultipleQuotaSourcesKeepCredentialsCachesAndIdentitiesSeparate(t *testi
 			}})
 		}))
 	}
-	primary := newCPA("PRIVATE_PRIMARY_KEY", 10, &primaryCalls)
+	primary := newCPA("PRIVATE_PRIMARY_KEY", 10, 1, &primaryCalls)
 	defer primary.Close()
-	second := newCPA("PRIVATE_SECOND_KEY", 20, &secondCalls)
+	second := newCPA("PRIVATE_SECOND_KEY", 20, 3, &secondCalls)
 	defer second.Close()
 	legacySub := newSub("PRIVATE_SUB_KEY", false, 30)
 	defer legacySub.Close()
 	secondSub := newSub("PRIVATE_JWT", true, 40)
 	defer secondSub.Close()
-	cfg := config.Config{PublicAccess: true, RequestTimeout: time.Second, MaxUpstreamBodyBytes: 1 << 20,
+	cfg := config.Config{PublicAccess: true, CPAMPBaseURL: primary.URL, RequestTimeout: time.Second, MaxUpstreamBodyBytes: 1 << 20,
 		QuotaSources: []config.QuotaSource{
 			{Type: "cpamp", Name: "CPA 二号", BaseURL: second.URL, AdminKey: "PRIVATE_SECOND_KEY"},
 			{Type: "sub2api", Name: "Sub 二号", BaseURL: secondSub.URL, AdminJWT: "PRIVATE_JWT"},
@@ -102,6 +130,23 @@ func TestMultipleQuotaSourcesKeepCredentialsCachesAndIdentitiesSeparate(t *testi
 			if account.SourceName != "" && account.SourceID == "" {
 				t.Fatal("named source has no opaque identity")
 			}
+			if account.Source == "cpamp" {
+				if account.InstanceID == "" || account.InstanceID != account.SourceID || account.InstanceName != account.SourceName {
+					t.Fatalf("CPAMP quota is missing its federated instance identity: %#v", account)
+				}
+				wantCount := int64(1)
+				wantRemaining := float64(90)
+				if account.InstanceID == federationSourceID(second.URL) {
+					wantCount, wantRemaining = 3, 80
+				} else if account.InstanceID != federationSourceID(primary.URL) {
+					t.Fatalf("unknown quota instance: %q", account.InstanceID)
+				}
+				if account.ResetCredits == nil || account.ResetCredits.AvailableCount == nil || *account.ResetCredits.AvailableCount != wantCount || len(account.ResetCredits.Credits) != int(wantCount) || account.ResetCredits.Partial || account.ResetCredits.Stale || account.Windows[0].Remaining != wantRemaining {
+					t.Fatalf("reset cards or quota crossed instance caches: %#v", account)
+				}
+			} else if account.ResetCredits != nil {
+				t.Fatalf("Sub2API inherited CPAMP reset cards: %#v", account)
+			}
 			if firstIDs != nil && !firstIDs[account.ID] {
 				t.Fatal("account identity changed when source order or name changed")
 			}
@@ -113,8 +158,8 @@ func TestMultipleQuotaSourcesKeepCredentialsCachesAndIdentitiesSeparate(t *testi
 		server.quotaSources[0], server.quotaSources[1] = server.quotaSources[1], server.quotaSources[0]
 		server.quotaSources[0].name = "已改名"
 	}
-	if primaryCalls.Load() != 1 || secondCalls.Load() != 1 {
-		t.Fatal("CPA instances did not retain separate quota caches")
+	if primaryCalls.Load() != 2 || secondCalls.Load() != 2 {
+		t.Fatalf("usage and reset reads did not retain separate instance caches: primary=%d secondary=%d", primaryCalls.Load(), secondCalls.Load())
 	}
 }
 

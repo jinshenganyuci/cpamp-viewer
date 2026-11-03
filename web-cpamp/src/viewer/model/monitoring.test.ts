@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildViewerMonitoringAccountRows,
+  buildViewerApiKeyFilterRows,
+  findViewerQuotaAccounts,
+  viewerEventPageFeedback,
+  buildViewerMonitoringSummary,
   buildViewerMonitoringApiKeyRows,
   buildViewerMonitoringEventRows,
   findViewerApiKeyIdsByAlias,
@@ -9,6 +13,12 @@ import {
 } from "./monitoring";
 import type { ViewerMonitoringEvent } from "./viewerTypes";
 import type { TFunction } from "i18next";
+import { resolveAccountDisplayText } from "@/features/monitoring/accountOverviewState";
+import {
+  buildViewerRealtimeLogRows,
+  buildViewerPrimarySummaryCards,
+  buildViewerSecondarySummaryCards,
+} from "./monitoringPage";
 import { buildRealtimeSourceDisplay } from "@/features/monitoring/realtimeSourceDisplay";
 
 describe("Viewer monitoring adapters", () => {
@@ -353,4 +363,243 @@ describe("Viewer monitoring adapters", () => {
       second,
     ]);
   });
+});
+
+describe("Viewer instance separation", () => {
+  const instances = [
+    { instance_id: "view_111111111111", instance_name: "CPA 一号" },
+    { instance_id: "view_222222222222", instance_name: "CPA 二号" },
+  ];
+
+  it("keeps identical account names distinct and masks their visible and hover labels", () => {
+    const rows = buildViewerMonitoringAccountRows(
+      instances.map((instance, index) => ({
+        ...instance,
+        id: `view_00000000000${index}`,
+        account_display: "reader@example.com",
+        auth_provider_snapshot: "codex",
+        source_ids: [`view_33333333333${index}`],
+      })),
+    );
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+    expect(rows.map((row) => row.accountMasked)).toEqual([
+      "rea***@example.com · CPA 一号",
+      "rea***@example.com · CPA 二号",
+    ]);
+    rows.forEach((row) => {
+      const display = resolveAccountDisplayText(row, "masked");
+      expect(display.title).not.toContain("reader@example.com");
+      expect(display.title).toContain(row.instance_name);
+    });
+    const events = buildViewerMonitoringEventRows(
+      instances.map((instance, index) => ({
+        ...instance,
+        event_hash: `view_00000000000${index}`,
+        timestamp_ms: 1720000000000,
+        account_display: "reader@example.com",
+        source_id: `view_33333333333${index}`,
+        auth_provider_snapshot: "codex",
+      })),
+      [],
+    );
+    const t = ((key: string) => key) as TFunction;
+    events.forEach((row, index) => {
+      const display = buildRealtimeSourceDisplay(row, t, "masked");
+      expect(JSON.stringify(display)).toContain(instances[index].instance_name);
+      expect(JSON.stringify(display)).not.toContain("reader@example.com");
+      expect(row.sourceIdentity).toBe(`view_33333333333${index}`);
+    });
+  });
+});
+
+describe("Viewer API Key dropdown fallback", () => {
+  it("lists aliases even when selector statistics are empty and retains both instances", () => {
+    const rows = buildViewerApiKeyFilterRows(
+      [
+        { id: "view_111111111111", alias: "Shared", instance_name: "CPA 一号" },
+        { id: "view_222222222222", alias: "Shared", instance_name: "CPA 二号" },
+        { id: "a".repeat(64), alias: "raw hash must stay hidden" },
+      ],
+      { filter_options: { api_key_stats: [] } },
+    );
+    expect(rows.map((row) => row.apiKeyLabel)).toEqual([
+      "Shared · CPA 一号",
+      "Shared · CPA 二号",
+    ]);
+    expect(resolveViewerApiKeySearchScope(rows, "Shared", "all")).toEqual({
+      apiKeyIds: ["view_111111111111", "view_222222222222"],
+      searchQuery: "",
+    });
+    expect(
+      resolveViewerApiKeySearchScope(rows, "Shared · CPA 二号", "all")
+        .apiKeyIds,
+    ).toEqual(["view_222222222222"]);
+  });
+
+  it("uses legacy selectors and events but never makes an unknown client selectable", () => {
+    const rows = buildViewerApiKeyFilterRows([], {
+      filter_selectors: {
+        api_key_stats: [
+          { id: "view_111111111111", api_key_alias: "Selector key" },
+        ],
+      },
+      events: {
+        items: [
+          {
+            event_hash: "event-a",
+            timestamp_ms: 1,
+            api_key_id: "view_222222222222",
+            api_key_alias: "Event key",
+          },
+          {
+            event_hash: "event-b",
+            timestamp_ms: 2,
+            api_key_id: "view_333333333333",
+            api_key_selectable: false,
+          },
+        ],
+      },
+    });
+    expect(rows.map((row) => row.id)).toEqual([
+      "view_111111111111",
+      "view_222222222222",
+    ]);
+  });
+
+  it("matches quota only inside the account's instance even when the email is identical", () => {
+    const [row] = buildViewerMonitoringAccountRows([
+      {
+        id: "view_111111111111",
+        instance_id: "instance-a",
+        instance_name: "CPA A",
+        account_display: "reader@example.com",
+        auth_provider_snapshot: "codex",
+      },
+    ]);
+    const quotas = ["instance-a", "instance-b"].map((instance_id) => ({
+      id: instance_id,
+      instance_id,
+      provider: "codex",
+      display_name: "reader@example.com",
+      status: "active",
+      windows: [],
+    }));
+    expect(findViewerQuotaAccounts(row, quotas)).toEqual([quotas[0]]);
+    expect(findViewerQuotaAccounts(row, [quotas[1]])).toEqual([]);
+  });
+});
+
+it("does not price a different instance with the primary instance's model prices", () => {
+  const event = {
+    event_hash: "event-cost",
+    timestamp_ms: 1720000000000,
+    instance_id: "instance-b",
+    model: "priced",
+    input_tokens: 1000000,
+  };
+  const prices = { priced: { prompt: 99, completion: 99, cache: 99 } };
+  const [unknown] = buildViewerMonitoringEventRows([event], [], prices);
+  const [known] = buildViewerMonitoringEventRows(
+    [{ ...event, cost: 3 }],
+    [],
+    prices,
+  );
+  expect(unknown.costKnown).toBe(false);
+  expect(unknown.totalCost).not.toBe(99);
+  expect(known.costKnown).toBe(true);
+  expect(known.totalCost).toBe(3);
+});
+
+it("keeps status histories separate even when two instances have the same public name", () => {
+  const rows = buildViewerMonitoringEventRows(
+    [1, 2].map((index) => ({
+      event_hash: `event-${index}`,
+      timestamp_ms: 1720000000000 + index,
+      account_id: `view_00000000000${index}`,
+      account_display: "reader@example.com",
+      instance_name: "Same CPA",
+      instance_id: `instance-${index}`,
+      model: "same-model",
+      auth_provider_snapshot: "codex",
+      total_tokens: 10,
+      failed: index === 1,
+    })),
+    [],
+  );
+  const history = buildViewerRealtimeLogRows(rows);
+  expect(new Set(history.map((row) => row.streamKey)).size).toBe(2);
+  expect(history.map((row) => row.requestCount)).toEqual([1, 1]);
+  expect(history.map((row) => row.successRate)).toEqual([1, 0]);
+});
+
+it("prices missing event cost from its own instance only", () => {
+  const event = {
+    event_hash: "event-priced",
+    timestamp_ms: 1720000000000,
+    instance_id: "instance-b",
+    model: "priced",
+    input_tokens: 1000000,
+  };
+  const [row] = buildViewerMonitoringEventRows(
+    [event],
+    [],
+    { priced: { prompt: 99, completion: 99, cache: 0 } },
+    { "instance-b": { priced: { prompt: 2, completion: 2, cache: 0 } } },
+  );
+  expect(row.totalCost).toBe(2);
+  expect(row.costKnown).toBe(true);
+});
+
+it("preserves unavailable federated averages and rates instead of manufacturing zeros", () => {
+  const summary = buildViewerMonitoringSummary({
+    summary: {
+      success_rate: null,
+      avg_daily_requests: null,
+      avg_daily_tokens: null,
+      approx_task_success_rate: null,
+      cache_hit_rate: null,
+    },
+  });
+  expect(summary).toMatchObject({
+    successRate: null,
+    avgDailyRequests: null,
+    avgDailyTokens: null,
+    approxTaskSuccessRate: null,
+    cacheHitRate: null,
+  });
+  const t = ((key: string) => key) as TFunction;
+  const primary = buildViewerPrimarySummaryCards({
+    summary,
+    t,
+    locale: "en",
+    accountCount: 2,
+    failedGroupCount: 0,
+    hasPrices: true,
+  });
+  expect(primary.find((card) => card.icon === "success")?.value).toBe("--");
+  expect(
+    buildViewerSecondarySummaryCards(summary, "en", t).find(
+      (card) => card.icon === "cache",
+    )?.meta,
+  ).toContain("--");
+});
+
+it("reports partial event page failure while retaining the current events and allows recovery", () => {
+  const current = [
+    { event_hash: "view_111111111111", timestamp_ms: 1720000000000 },
+  ];
+  const response = {
+    partial_failed: true,
+    warnings: ["CPA 二号暂不可用"],
+    events: {
+      items: [],
+      has_more: true,
+      next_cursor: "retry-cursor",
+    },
+  };
+  expect(mergeViewerMonitoringEvents(current, response.events.items)).toEqual(
+    current,
+  );
+  expect(viewerEventPageFeedback(response)).toBe("CPA 二号暂不可用");
+  expect(viewerEventPageFeedback({ events: { items: current } })).toBe("");
 });

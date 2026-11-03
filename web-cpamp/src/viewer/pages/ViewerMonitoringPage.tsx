@@ -72,10 +72,13 @@ import {
 } from "@/viewer/model/analytics";
 import {
   buildViewerMonitoringAccountRows,
+  buildViewerApiKeyFilterRows,
+  findViewerQuotaAccounts,
   buildViewerMonitoringApiKeyRows,
   buildViewerMonitoringEventRows,
   buildViewerMonitoringSummary,
   mergeViewerMonitoringEvents,
+  viewerEventPageFeedback,
   resolveViewerApiKeySearchScope,
 } from "@/viewer/model/monitoring";
 import {
@@ -89,6 +92,7 @@ import {
   buildViewerPrimarySummaryCards,
   buildViewerProviderOptions,
   buildViewerRealtimeLogRows,
+  buildViewerEventStreamKey,
   buildViewerSecondarySummaryCards,
   buildViewerStatusOptions,
   formatViewerAccountScopeText,
@@ -99,8 +103,11 @@ import {
 import type {
   ViewerAnalyticsResponse,
   ViewerMonitoringEvent,
-  ViewerQuotaAccount,
 } from "@/viewer/model/viewerTypes";
+import {
+  viewerSourceWarnings,
+  withViewerInstance,
+} from "@/viewer/model/instance";
 import { viewerApi } from "@/viewer/viewerApi";
 
 type MonitoringDataTab = "accounts" | "apiKeys" | "realtime";
@@ -162,36 +169,6 @@ const buildSafeOptionList = (
       .sort((left, right) => left[1].localeCompare(right[1]))
       .map(([value, label]) => ({ value, label })),
   ];
-};
-
-const normalizeMatchText = (value: string | null | undefined) =>
-  String(value || "")
-    .trim()
-    .toLocaleLowerCase();
-
-const findViewerQuotaAccounts = (
-  row: MonitoringAccountRow,
-  quotaAccounts: ViewerQuotaAccount[],
-) => {
-  const rowProvider = normalizeMatchText(row.provider);
-  const identityValues = new Set(
-    [row.account, row.displayAccount, ...row.authLabels]
-      .map(normalizeMatchText)
-      .filter(Boolean),
-  );
-  const displayMatches = quotaAccounts.filter((account) => {
-    const provider = normalizeMatchText(account.provider);
-    return (
-      identityValues.has(normalizeMatchText(account.display_name)) &&
-      (!rowProvider || !provider || provider === rowProvider)
-    );
-  });
-  if (displayMatches.length > 0) return displayMatches;
-  if (!rowProvider) return [];
-  const providerMatches = quotaAccounts.filter(
-    (account) => normalizeMatchText(account.provider) === rowProvider,
-  );
-  return providerMatches.length === 1 ? providerMatches : [];
 };
 
 export function ViewerMonitoringPage() {
@@ -284,9 +261,14 @@ export function ViewerMonitoringPage() {
   const usageImportInputRef = useRef<HTMLInputElement | null>(null);
   const [usageExporting, setUsageExporting] = useState(false);
 
-  const { aliases, refresh: refreshAliases } = useViewerAliases();
+  const {
+    aliases,
+    warnings: aliasWarnings,
+    refresh: refreshAliases,
+  } = useViewerAliases();
   const {
     prices: modelPrices,
+    instancePrices,
     error: modelPricesError,
     refresh: refreshModelPrices,
   } = useViewerModelPrices();
@@ -368,19 +350,16 @@ export function ViewerMonitoringPage() {
     },
   );
   const filterApiKeyRows = useMemo(
-    () =>
-      buildViewerMonitoringApiKeyRows(
-        filterSelectorsAnalytics.data?.filter_options?.api_key_stats,
-        aliases,
-      ),
-    [aliases, filterSelectorsAnalytics.data?.filter_options?.api_key_stats],
+    () => buildViewerApiKeyFilterRows(aliases, filterSelectorsAnalytics.data),
+    [aliases, filterSelectorsAnalytics.data],
   );
   const filterAccountRows = useMemo(
     () =>
       buildViewerMonitoringAccountRows(
-        filterSelectorsAnalytics.data?.filter_options?.account_stats,
+        filterSelectorsAnalytics.data?.filter_options?.account_stats ??
+          filterSelectorsAnalytics.data?.filter_selectors?.account_stats,
       ),
-    [filterSelectorsAnalytics.data?.filter_options?.account_stats],
+    [filterSelectorsAnalytics.data],
   );
   const selectedAccountRow = useMemo(
     () =>
@@ -405,9 +384,7 @@ export function ViewerMonitoringPage() {
       if (selectedAccountRow?.authIndices.length) {
         filters.auth_indices = selectedAccountRow.authIndices;
       } else {
-        filters.accounts = [
-          selectedAccountRow?.filterValue || selectedAccount,
-        ];
+        filters.accounts = [selectedAccountRow?.filterValue || selectedAccount];
       }
     }
     if (selectedProvider !== "all") {
@@ -618,6 +595,9 @@ export function ViewerMonitoringPage() {
       const response = (await viewerApi.analytics(
         payload,
       )) as ViewerAnalyticsResponse;
+      const warning = viewerEventPageFeedback(response);
+      if (warning)
+        setEventsLoadError({ scopeKey: requestKey, message: warning });
       const page = response.events;
       const mergedItems = mergeViewerMonitoringEvents(
         activeEventItems,
@@ -636,7 +616,12 @@ export function ViewerMonitoringPage() {
     } catch (reason) {
       setEventsLoadError({
         scopeKey: requestKey,
-        message: reason instanceof Error ? reason.message : String(reason),
+        message:
+          reason instanceof Error && "status" in reason && reason.status === 409
+            ? "分页状态已过期，请刷新请求监控后重新加载。"
+            : reason instanceof Error
+              ? reason.message
+              : String(reason),
       });
     } finally {
       setEventsLoadingMore(false);
@@ -675,8 +660,13 @@ export function ViewerMonitoringPage() {
   );
   const eventRows = useMemo(
     () =>
-      buildViewerMonitoringEventRows(activeEventItems, aliases, modelPrices),
-    [activeEventItems, aliases, modelPrices],
+      buildViewerMonitoringEventRows(
+        activeEventItems,
+        aliases,
+        modelPrices,
+        instancePrices,
+      ),
+    [activeEventItems, aliases, modelPrices, instancePrices],
   );
   const realtimeLogRows = useMemo(
     () => buildViewerRealtimeLogRows(eventRows),
@@ -691,13 +681,7 @@ export function ViewerMonitoringPage() {
         t,
         accountDisplayMode,
       ),
-    [
-      accountDisplayMode,
-      accountRows,
-      filterAccountRows,
-      selectedAccount,
-      t,
-    ],
+    [accountDisplayMode, accountRows, filterAccountRows, selectedAccount, t],
   );
   const providerOptions = useMemo(
     () =>
@@ -732,7 +716,11 @@ export function ViewerMonitoringPage() {
           "monitoring.filter_all_channels",
         ),
         eventRows.map(
-          (row) => [row.sourceKey, row.channel || row.source] as const,
+          (row) =>
+            [
+              row.sourceKey,
+              withViewerInstance(row.channel || row.source, row),
+            ] as const,
         ),
         selectedChannel,
       ),
@@ -747,13 +735,25 @@ export function ViewerMonitoringPage() {
           "monitoring.filter_all_api_keys",
         ),
         [
-          ...filterApiKeyRows.filter((row) => !row.isUnknown).map(
+          ...buildViewerApiKeyFilterRows(
+            aliases,
+            filterSelectorsAnalytics.data,
+            data,
+            realtimeData,
+          ).map(
             (row) => [row.id, row.apiKeyLabel || row.apiKeyMasked] as const,
           ),
         ],
         selectedApiKeyId,
       ),
-    [filterApiKeyRows, selectedApiKeyId, t],
+    [
+      aliases,
+      filterSelectorsAnalytics.data,
+      data,
+      realtimeData,
+      selectedApiKeyId,
+      t,
+    ],
   );
   const statusOptions = useMemo(() => buildViewerStatusOptions(t), [t]);
 
@@ -862,15 +862,13 @@ export function ViewerMonitoringPage() {
   const failedGroupCount = useMemo(
     () =>
       new Set(
-        eventRows
-          .filter((row) => row.failed)
-          .map((row) =>
-            [row.account, row.provider, row.model, row.channel].join("::"),
-          ),
+        eventRows.filter((row) => row.failed).map(buildViewerEventStreamKey),
       ).size,
     [eventRows],
   );
-  const hasPrices = Object.keys(modelPrices).length > 0;
+  const hasPrices =
+    Object.keys(modelPrices).length > 0 ||
+    data?.summary?.total_cost !== undefined;
   const primarySummaryCards = useMemo(
     () =>
       buildViewerPrimarySummaryCards({
@@ -1081,6 +1079,14 @@ export function ViewerMonitoringPage() {
   const overallLoading = analyticsLoading || eventsLoadingMore;
   const combinedError = [
     analyticsError,
+    filterSelectorsAnalytics.error,
+    ...(aliasWarnings ?? []),
+    ...viewerSourceWarnings(
+      data,
+      realtimeData,
+      filterSelectorsAnalytics.data,
+      quotaData,
+    ),
     activeEventsLoadError,
     modelPricesError ? `Model prices: ${modelPricesError}` : "",
     quotaError ? `Quota: ${quotaError}` : "",

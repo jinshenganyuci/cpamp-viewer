@@ -329,3 +329,21 @@ describe('usageAnalyticsPresentation', () => {
     expect(singleCostedCards[4].tone).toBeUndefined();
   });
 });
+
+
+it('shows an explicitly unknown federated cache rate without estimating it from token totals', () => {
+  const cards = buildUsageOverviewSummaryCards({
+    summary: { ...summary, cacheHitRate: null, p95LatencyMs: null },
+    summaryDelta, locale: 'en-US', t, anomalyCount: 0, reasoningTokens: 0,
+  });
+  expect(cards.find((card) => card.icon === 'cache')?.meta).toContain('--');
+});
+
+
+it('shows an unknown federated success rate as unavailable', () => {
+  const cards = buildUsageOverviewSummaryCards({
+    summary: { ...summary, successRate: null }, summaryDelta,
+    locale: 'en-US', t, anomalyCount: 0, reasoningTokens: 0,
+  });
+  expect(cards.find((card) => card.icon === 'success')?.value).toBe('--');
+});

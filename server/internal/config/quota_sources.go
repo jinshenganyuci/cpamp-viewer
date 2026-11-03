@@ -16,24 +16,52 @@ import (
 const maxQuotaSources = 16
 
 type QuotaSource struct {
-	Type        string
-	Name        string
-	BaseURL     string
-	AdminKey    string
-	AdminAPIKey string
-	AdminJWT    string
+	Type                  string
+	Name                  string
+	BaseURL               string
+	AdminKey              string
+	AdminAPIKey           string
+	AdminJWT              string
+	AccessGuardPublicAll  *bool
+	AccessGuardPublicKeys []AccessGuardPublicKey
 }
 
 type quotaSourceInput struct {
-	Type            string `json:"type"`
-	Name            string `json:"name"`
-	BaseURL         string `json:"base_url"`
-	AdminKey        string `json:"admin_key"`
-	AdminKeyFile    string `json:"admin_key_file"`
-	AdminAPIKey     string `json:"admin_api_key"`
-	AdminAPIKeyFile string `json:"admin_api_key_file"`
-	AdminJWT        string `json:"admin_jwt"`
-	AdminJWTFile    string `json:"admin_jwt_file"`
+	Type                  string          `json:"type"`
+	Name                  string          `json:"name"`
+	BaseURL               string          `json:"base_url"`
+	AdminKey              string          `json:"admin_key"`
+	AdminKeyFile          string          `json:"admin_key_file"`
+	AdminAPIKey           string          `json:"admin_api_key"`
+	AdminAPIKeyFile       string          `json:"admin_api_key_file"`
+	AdminJWT              string          `json:"admin_jwt"`
+	AdminJWTFile          string          `json:"admin_jwt_file"`
+	AccessGuardPublicAll  json.RawMessage `json:"access_guard_public_all,omitempty"`
+	AccessGuardPublicKeys json.RawMessage `json:"access_guard_public_keys,omitempty"`
+}
+
+func (input *quotaSourceInput) UnmarshalJSON(data []byte) error {
+	invalid := errors.New("invalid quota source configuration")
+	fields, ok := decodeAccessGuardObject(data)
+	if !ok {
+		return invalid
+	}
+	// Reject duplicate fields and case aliases rather than silently choosing a
+	// different public selection from the one the administrator intended.
+	for field := range fields {
+		switch field {
+		case "type", "name", "base_url", "admin_key", "admin_key_file", "admin_api_key", "admin_api_key_file", "admin_jwt", "admin_jwt_file", "access_guard_public_all", "access_guard_public_keys":
+		default:
+			return invalid
+		}
+	}
+	type inputFields quotaSourceInput
+	var decoded inputFields
+	if json.Unmarshal(data, &decoded) != nil {
+		return invalid
+	}
+	*input = quotaSourceInput(decoded)
+	return nil
 }
 
 func loadQuotaSources(cfg Config) ([]QuotaSource, error) {
@@ -109,6 +137,34 @@ func parseQuotaSource(input quotaSourceInput) (QuotaSource, error) {
 	}
 	if len(source.Name) > 80 || strings.IndexFunc(source.Name, unicode.IsControl) >= 0 {
 		return QuotaSource{}, errors.New("name must be at most 80 bytes and contain no control characters")
+	}
+	hasPublicAll := len(input.AccessGuardPublicAll) != 0
+	hasPublicKeys := len(input.AccessGuardPublicKeys) != 0
+	if hasPublicAll || hasPublicKeys {
+		if source.Type != "cpamp" {
+			return QuotaSource{}, errors.New("Access Guard public selection is only supported for CPA sources")
+		}
+		if hasPublicAll && hasPublicKeys {
+			return QuotaSource{}, errors.New("configure only one of access_guard_public_all and access_guard_public_keys")
+		}
+		if hasPublicAll {
+			var publicAll bool
+			switch string(bytes.TrimSpace(input.AccessGuardPublicAll)) {
+			case "true":
+				publicAll = true
+			case "false":
+			default:
+				return QuotaSource{}, errors.New("access_guard_public_all must be a boolean")
+			}
+			source.AccessGuardPublicAll = &publicAll
+		} else {
+			keys, err := decodeAccessGuardPublicKeys(append(append([]byte(`{"keys":`), input.AccessGuardPublicKeys...), '}'))
+			if err != nil {
+				return QuotaSource{}, err
+			}
+			// An explicit empty array must remain non-nil to override global access.
+			source.AccessGuardPublicKeys = keys
+		}
 	}
 	var err error
 	source.BaseURL, err = validateServiceURL(strings.TrimSpace(input.BaseURL), "base_url")

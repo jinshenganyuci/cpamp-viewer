@@ -142,7 +142,7 @@ describe('accountOverviewState', () => {
     });
   });
 
-  it('resolves masked and full account labels with full account tooltip text', () => {
+  it('resolves masked and full account labels with matching tooltip privacy', () => {
     const row = createAccountRow({
       account: 'very-long-account-name@example.com',
       displayAccount: 'very-long-account-name@example.com',
@@ -153,7 +153,7 @@ describe('accountOverviewState', () => {
       primary: 'ver***@example.com',
       fullAccount: 'very-long-account-name@example.com',
     });
-    expect(resolveAccountDisplayText(row, 'masked').title).toContain(
+    expect(resolveAccountDisplayText(row, 'masked').title).not.toContain(
       'very-long-account-name@example.com'
     );
     expect(resolveAccountDisplayText(row, 'full')).toMatchObject({

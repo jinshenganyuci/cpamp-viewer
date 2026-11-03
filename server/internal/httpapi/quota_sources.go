@@ -7,15 +7,15 @@ import (
 	"time"
 
 	"cpamp-viewer/server/internal/config"
-	"cpamp-viewer/server/internal/cpamp"
 	"cpamp-viewer/server/internal/sub2api"
 )
 
 type quotaSource struct {
-	id   string
-	kind string
-	name string
-	load func(context.Context) ([]quotaAccount, error)
+	id     string
+	kind   string
+	name   string
+	load   func(context.Context) ([]quotaAccount, error)
+	reader *Server
 }
 
 func newAdditionalQuotaSources(cfg config.Config) []quotaSource {
@@ -24,24 +24,31 @@ func newAdditionalQuotaSources(cfg config.Config) []quotaSource {
 		reader := &Server{}
 		var load func(context.Context) ([]quotaAccount, error)
 		if source.Type == "cpamp" {
-			reader.cpamp = cpamp.New(source.BaseURL, source.AdminKey, cfg.RequestTimeout, cfg.MaxUpstreamBodyBytes)
-			reader.codexUsage = newCodexUsageCache(reader.cpamp, cfg.RequestTimeout)
-			reader.cachedQuotaSnapshots = newQuotaSnapshotCache(reader.cpamp, cfg.RequestTimeout)
+			reader = newFederatedCPAMPReader(cfg, source)
 			load = reader.loadCPAMPQuota
 		} else {
 			reader.sub2api = sub2api.New(source.BaseURL, source.AdminAPIKey, source.AdminJWT, cfg.RequestTimeout, cfg.MaxUpstreamBodyBytes)
 			load = reader.loadSub2APIQuota
 		}
+		id := pseudonym("quota-source:" + source.Type + ":" + source.BaseURL)
+		if source.Type == "cpamp" {
+			id = federationSourceID(source.BaseURL)
+		}
 		sources = append(sources, quotaSource{
-			id:   pseudonym("quota-source:" + source.Type + ":" + source.BaseURL),
-			kind: source.Type, name: cleanText(source.Name, 80), load: load,
+			id:   id,
+			kind: source.Type, name: cleanText(source.Name, 80), load: load, reader: reader,
 		})
 	}
 	return sources
 }
 
 func (s *Server) loadCombinedQuota(ctx context.Context) (quotaResponse, error) {
-	sources := []quotaSource{{kind: "cpamp", name: "CPA Manager Plus", load: s.loadCPAMPQuota}}
+	multiCPAMP := len(s.cpampReadSources()) > 1
+	primaryID := ""
+	if multiCPAMP {
+		primaryID = federationSourceID(s.cfg.CPAMPBaseURL)
+	}
+	sources := []quotaSource{{id: primaryID, kind: "cpamp", name: "CPA Manager Plus", load: s.loadCPAMPQuota}}
 	if s.sub2api != nil {
 		sources = append(sources, quotaSource{kind: "sub2api", name: "Sub2API", load: s.loadSub2APIQuota})
 	}
@@ -86,9 +93,12 @@ func (s *Server) loadCombinedQuota(ctx context.Context) (quotaResponse, error) {
 		for _, account := range result.accounts {
 			account.Source = source.kind
 			if source.id != "" {
-				account.ID = pseudonym(source.id + ":" + account.ID)
+				account.ID = federationViewID(source.id, account.ID)
 				account.SourceID = source.id
 				account.SourceName = source.name
+				if multiCPAMP || source.kind != "cpamp" {
+					account.InstanceID, account.InstanceName = source.id, source.name
+				}
 			}
 			response.Accounts = append(response.Accounts, account)
 		}
